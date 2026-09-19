@@ -1,0 +1,87 @@
+# Single source of truth for dates, thresholds, retriever weights and seeds.
+seed: 42
+
+gdelt:
+  # GDELT 1.0 event files (single schema 1979 -> present; avoids the 1.0/2.0 regime break)
+  base_url: https://data.gdeltproject.org/events/
+  filesizes_url: https://data.gdeltproject.org/events/filesizes
+  start_year: 1979
+  end_date: "2026-09-18"
+  # dedupe key: (SQLDATE, Actor1Code, Actor2Code, EventCode, ActionGeo_Lat, ActionGeo_Long)
+  dedupe: true
+  # events with SQLDATE more than this many days before the file date are dropped (stale references)
+  max_event_lag_days: 7
+
+panel:
+  frequency: weekly            # forecast dates are Mondays; features use trailing windows ending the day before
+  windows_days: [7, 30, 90]
+  # dyad universe: undirected pairs with >= min_trailing_events in the trailing 365 days at the forecast date
+  min_trailing_events_365d: 200
+  regime_indicator: true       # 1 for daily-file era (>= 2013-04-01), 0 for backfile era
+
+labels:
+  horizon_days: 30             # primary: ICB onset for the dyad within next 30 days
+  # secondary: material-conflict (QuadClass 4) rate in next 30d exceeds baseline * ratio and >= min_events
+  threshold_ratio: 3.0
+  threshold_min_events: 20
+  baseline_window_days: 365
+
+model:
+  gap_days: 30                 # gap between end of training window and start of test window (label horizon)
+  folds:                       # walk-forward folds: [train_end, valid_end, test_end]  (train < valid < test)
+    - {train_end: "1995-01-01", valid_end: "1997-01-01", test_end: "2000-01-01"}
+    - {train_end: "2000-01-01", valid_end: "2002-01-01", test_end: "2005-01-01"}
+    - {train_end: "2005-01-01", valid_end: "2007-01-01", test_end: "2010-01-01"}
+    - {train_end: "2010-01-01", valid_end: "2012-01-01", test_end: "2015-01-01"}
+    - {train_end: "2015-01-01", valid_end: "2017-01-01", test_end: "2020-01-01"}
+    - {train_end: "2019-01-01", valid_end: "2020-07-01", test_end: "2021-10-01"}
+  lightgbm:
+    objective: binary
+    learning_rate: 0.03
+    num_leaves: 31
+    min_data_in_leaf: 200
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 1
+    lambda_l2: 5.0
+    num_boost_round: 600
+    early_stopping_rounds: 50
+    verbose: -1
+  calibration: isotonic        # fit on the validation slice only
+  interval: bootstrap          # bootstrap over trees/rows for the confidence band shown in the app
+  n_bootstrap: 30
+
+retrieval:
+  es_index_cases: signal_icb_cases
+  es_index_forecasts: signal_dyad_forecasts
+  vector_dim: 32               # PCA dim of the 90-day run-up vector
+  k: 5
+  num_candidates: 200
+  # schema retriever weights (tuned only on training-period cases). Field -> weight.
+  schema_weights:
+    pre_onset:
+      geog: 2.0
+      powdis: 1.5
+      gpinv: 1.5
+      powinv: 1.0
+      regime_pair: 1.0
+      nuclear: 1.0
+      protrac: 1.0
+    at_onset:
+      trigent: 2.0
+      issue: 1.5
+      gravcr: 1.5
+      noactr: 0.5
+  rrf_k: 60
+
+markets:
+  snapshot_days_before_resolution: [30, 14, 7, 1]
+  min_markets: 20
+
+demo:
+  # seeded hero replays (dyad, window). Middle East + Asia focus.
+  hero_dyads:
+    - {a: ISR, b: LBN, start: "2006-04-01", end: "2006-09-30", crisis: "ISRAEL-LEBANON WAR II (2006)"}
+    - {a: IND, b: PAK, start: "2019-01-01", end: "2019-05-31", crisis: "PULWAMA-BALAKOT (2019)"}
+    - {a: RUS, b: UKR, start: "2021-10-01", end: "2022-03-31", crisis: "RUSSIAN INVASION OF UKRAINE (2022)"}
+    - {a: USA, b: IRN, start: "2019-04-01", end: "2020-02-29", crisis: "US-IRAN 2019-20"}

@@ -1,0 +1,24 @@
+# secrets
+.env
+*.pem
+*.key
+# data & artifacts (checkpointed separately)
+data/raw/gdelt/
+data/processed/
+data/artifacts/*.bin
+data/artifacts/*.pkl
+*.parquet
+!data/artifacts/demo/*.parquet
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+# node
+app/frontend/node_modules/
+app/frontend/dist/
+# misc
+.DS_Store
+*.log
+notebooks/.ipynb_checkpoints/
+data/raw/icb/*_codebook.txt
