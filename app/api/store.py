@@ -183,9 +183,14 @@ class Store:
         w = _sunday_on_or_before(d)
         return max(self.t_min, min(self.t_max, w))
 
+    @staticmethod
+    def _horizon_coded(t: date) -> bool:
+        """True when the whole 30-day label horizon falls inside ICB coverage."""
+        return t + timedelta(days=30) <= ICB_COMPLETE_END
+
     def _sample_flags(self, t: date) -> dict:
         return {"trees_out_of_sample": t >= FINAL_TRAIN_END, "calibration_out_of_sample": t > ICB_COMPLETE_END,
-                "icb_label_available": t <= ICB_COMPLETE_END}
+                "icb_label_available": self._horizon_coded(t)}
 
     # ------------------------------------------------------------------ queries
     @_locked
@@ -275,7 +280,7 @@ class Store:
                                        "end_date": c["end_date"]} for c in self.onsets_by_dyad.get(dyad, [])
                                       if date.fromisoformat(c["onset_date"]) <= t <= date.fromisoformat(c["end_date"])), None)
         nxt = [c for c in self.onsets_by_dyad.get(dyad, []) if t < date.fromisoformat(c["onset_date"]) <= t + timedelta(days=30)]
-        out["onset_within_30d"] = None if t > ICB_COMPLETE_END else (
+        out["onset_within_30d"] = None if not self._horizon_coded(t) else (
             {"crisno": nxt[0]["crisno"], "name": nxt[0]["name"], "onset_date": nxt[0]["onset_date"]} if nxt else False)
         return out
 

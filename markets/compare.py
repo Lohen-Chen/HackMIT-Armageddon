@@ -42,6 +42,8 @@ DEESCALATION_KW = re.compile(
     r"withdraw|agrees? to .*ceasefire",
     re.I,
 )
+# "Will no X occur ...?" / "... without a strike ...?": YES means the escalation did NOT happen
+NEGATION_KW = re.compile(r"\b(?:no|not|never|without)\b", re.I)
 # dated one-day markets ("... on February 27 (ET)?") are not 30-day-horizon questions
 DAILY_KW = re.compile(r"\bon (?:january|february|march|april|may|june|july|august|september|october|november|december) \d", re.I)
 
@@ -51,11 +53,25 @@ MAX_PER_DYAD = 5
 MIN_VOLUME = 250_000
 
 
+def direction(question: str) -> int:
+    """+1 if a YES resolution means escalation happened, -1 if YES means it did not.
+
+    Ceasefire / war-ends wording and negated escalation predicates ("Will no strike occur?") both flip.
+    A negated de-escalation question ("no ceasefire by ...") flips twice, i.e. YES == escalation.
+    """
+    d = 1
+    if DEESCALATION_KW.search(question):
+        d = -d
+    if NEGATION_KW.search(question):
+        d = -d
+    return d
+
+
 def select_markets(m: pd.DataFrame) -> pd.DataFrame:
     col = f"price_d{SNAP_DAYS}"
     u = m[m.dyad.notna() & m[col].notna() & (m.volume >= MIN_VOLUME)].copy()
     u = u[u.question.str.contains(ESCALATION_KW, regex=True) & ~u.question.str.contains(DAILY_KW, regex=True)]
-    u["direction"] = np.where(u.question.str.contains(DEESCALATION_KW), -1, 1)
+    u["direction"] = u.question.map(direction).astype(int)
     u["p_market"] = np.where(u.direction == 1, u[col], 1 - u[col]).astype(float)
     u["outcome_esc"] = np.where(u.direction == 1, u.outcome, 1 - u.outcome).astype(int)
     u = u.sort_values("volume", ascending=False)
