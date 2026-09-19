@@ -35,6 +35,11 @@ Decisions taken without asking, with the reason.  Newest at the bottom.
    codes); ICB dyads are mapped the same way, so "who triggered whom" is not part of the label.
 
 ## Dyad universe
+7b. **Dense calendar week grid.**  GDELT's archive has whole weeks with no files at all
+   (2025-06-15 .. 2025-07-01, plus two single days that 404).  Those weeks are zero-filled so every
+   k-week window covers exactly 7k days and the forward label window is exactly 4 weeks; the
+   alternative (skipping the weeks) silently widened the windows around the gap.  Rows in the gap
+   weeks therefore show zero events - that is what the data says, not a crash.
 8. A dyad enters the panel in a week if it had >= 200 deduplicated GDELT events in the trailing
    365 days *or* it appears in any ICB dyad ever.  This keeps ~1-2k dyads instead of 40k+ and is
    entirely pre-forecast-date information.  Documented in `pipeline/features.py`.
@@ -79,6 +84,25 @@ Decisions taken without asking, with the reason.  Newest at the bottom.
     treats the market's resolution as the outcome and the model's calibrated escalation probability
     for the dyad at the snapshot date as its forecast.  It is a *signal* comparison, reported with
     n and without claiming either side "wins" beyond what the Brier scores show.
+
+18. Market selection (`markets/compare.py`): resolved binary markets, >= $250k volume, escalation
+    keywords, no "daily"/repeating questions, one market per Polymarket event and at most five per
+    dyad, ranked by volume.  Ceasefire / peace / withdrawal questions are inverted so YES means
+    escalation.  Snapshot = last CLOB price 30 days before resolution; the model forecast is the last
+    weekly forecast at or before the snapshot date (and no more than 13 days before it).
+19. The "model vs market" Brier compares the model's ICB-onset probability with a *different*
+    question; it is displayed as a diagnostic.  The leave-one-out logistic stack (market-only vs
+    market + model logit) is the comparison we stand behind, and with n = 60 it is indicative only.
+20. Kalshi returned no settled escalation markets with two detectable countries; collector kept.
+
+## Demo / serving
+21. `data/artifacts/demo/` is a git-tracked subset (all forecasts, weekly features for the 400 most
+    active dyads, SHAP panel rows for the top 60 + hero + market dyads).  The API prefers full pipeline
+    output and falls back to the pack per file; the UI shows a note when running from the pack.
+22. Analog retrieval uses Elasticsearch when `ES_URL`/`ES_API_KEY` are set on the server and FAISS +
+    local schema search otherwise; both implement the same interface and the same date invariant.
+23. Calibrated probabilities are never smoothed; the Wilson band is the 80% interval of the realised
+    rate in the isotonic step the raw score falls into (validation rows).
 
 ## Infra
 14. Analytical source of truth is parquet under `data/processed/`; Elasticsearch holds only the

@@ -14,7 +14,6 @@ outcomes agree with the true (held-out) outcome of the query case:
 Also asserts the invariants: every returned end_date < query_date and no ex_post field in any query body.
 """
 import argparse
-import json
 import os
 import statistics
 import time

@@ -7,7 +7,6 @@ t < scaler_fit_end (default 2010-01-01) and frozen in data/artifacts/vector_scal
 """
 import json
 import os
-from datetime import date, timedelta
 
 import duckdb
 import numpy as np

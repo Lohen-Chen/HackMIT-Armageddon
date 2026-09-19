@@ -17,7 +17,6 @@ below is hand-built.  Historical entities are mapped to the code GDELT itself us
 import os
 import sys
 
-import numpy as np
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -173,6 +172,10 @@ def prepare(write=True):
     d["iso3_b"] = d.nameb.map(COW_TO_ISO3)
     d["onset_date"] = _date(d.trgyrdy, d.trgmody, d.trgdady)
     d["end_date"] = _date(d.trmyrdy, d.trmmody, d.trmdady)
+    # placeholder crises (no system-level trigger date, e.g. the uncoded 2022 Ukraine entry) carry a
+    # dummy 1 Jan dyad date; treat them as undated so they never become labels or analogs
+    undated = set(cr.loc[cr.onset_date.isna(), "crisno"])
+    d.loc[d.crisno.isin(undated), ["onset_date", "end_date"]] = pd.NaT
     d["crisname"] = d.crisname.str.strip().str.title()
     d["dyad"] = [None if (pd.isna(a) or pd.isna(b) or a == b) else "_".join(sorted([a, b]))
                  for a, b in zip(d.iso3_a, d.iso3_b)]

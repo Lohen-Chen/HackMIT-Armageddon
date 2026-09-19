@@ -1,0 +1,35 @@
+{
+ "n_markets": 60,
+ "n_dyads": 20,
+ "snapshot_days_before": 30,
+ "base_rate": 0.4666666666666667,
+ "brier": {
+  "market": 0.25035187500000006,
+  "base_rate": 0.24888888888888897,
+  "model_raw_icb": 0.4583739746094397
+ },
+ "logloss": {
+  "market": 0.715750530832167,
+  "base_rate": 0.6909233093138182,
+  "model_raw_icb": 2.5372784781757645
+ },
+ "loo": {
+  "market_only": 0.21953966886436785,
+  "model_only": 0.25729831521775626,
+  "market_plus_model": 0.21944831199592724
+ },
+ "by_source": {
+  "polymarket": {
+   "n": 60,
+   "brier_market": 0.25035187500000006,
+   "brier_model": 0.4583739746094397
+  }
+ },
+ "caveats": [
+  "Market questions (e.g. 'US strikes Iran by <date>') are not the ICB onset event the model was trained on; the raw model Brier is reported for transparency, not as a like-for-like score.",
+  "Ceasefire / 'war ends' markets are flipped so YES always means escalation.",
+  "Markets are all from 2023-11 onward, i.e. after the ICB label window (through 2021-12-31): the model's trees and calibration are fully out-of-sample here.",
+  "Selection: escalation keyword filter, volume >= $250,000, a price 30 days before resolution, at most 1 markets per event and 5 per country pair.",
+  "Leave-one-out stacks refit a 1-2 parameter logistic on the other markets; with n this small the market-only vs market+model gap is indicative, not significant."
+ ]
+}

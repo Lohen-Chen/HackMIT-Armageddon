@@ -38,7 +38,7 @@ def build(fit_scaler_if_missing=True):
          .groupby(["crisno", "dyad"]).agg(onset_date=("onset_date", "min"), end_date=("end_date", "max"),
                                           iso3_a=("iso3_a", "first"), iso3_b=("iso3_b", "first")).reset_index())
     # crises without any mapped dyad (single-actor / unmatched) -> still index with actors list
-    single = cr[~cr.crisno.isin(d.crisno)][["crisno", "onset_date", "end_date"]].copy()
+    single = cr[~cr.crisno.isin(d.crisno) & cr.onset_date.notna()][["crisno", "onset_date", "end_date"]].copy()
     single["dyad"] = None
     d = pd.concat([d, single], ignore_index=True)
     d["end_date"] = d.end_date.fillna(d.onset_date + pd.Timedelta(days=365))

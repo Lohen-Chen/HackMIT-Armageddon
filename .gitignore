@@ -5,10 +5,11 @@
 # data & artifacts (checkpointed separately)
 data/raw/gdelt/
 data/processed/
-data/artifacts/*.bin
-data/artifacts/*.pkl
+*.bin
+*.pkl
 *.parquet
-!data/artifacts/demo/*.parquet
+!data/artifacts/demo/**
+data/raw/markets/
 # python
 __pycache__/
 *.pyc
