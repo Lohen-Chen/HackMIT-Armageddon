@@ -13,8 +13,8 @@ gdelt:
   max_event_lag_days: 7
 
 panel:
-  frequency: weekly            # forecast dates are Mondays; features use trailing windows ending the day before
-  windows_days: [7, 30, 90]
+  frequency: weekly            # forecast date t = Sunday; features use days <= t, labels use (t, t+30d]
+  windows_days: [7, 28, 91, 364]   # 1 / 4 / 13 / 52 whole weeks (spec's 30/90d approximated by whole weeks)
   # dyad universe: undirected pairs with >= min_trailing_events in the trailing 365 days at the forecast date
   min_trailing_events_365d: 200
   regime_indicator: true       # 1 for daily-file era (>= 2013-04-01), 0 for backfile era
@@ -25,6 +25,7 @@ labels:
   threshold_ratio: 3.0
   threshold_min_events: 20
   baseline_window_days: 365
+  icb_last_complete_date: "2021-12-31"  # ICB v16 last coded onset 2021-09-20
 
 model:
   gap_days: 30                 # gap between end of training window and start of test window (label horizon)
@@ -51,25 +52,30 @@ model:
   interval: bootstrap          # bootstrap over trees/rows for the confidence band shown in the app
   n_bootstrap: 30
 
+elasticsearch:
+  cases_index: signal_icb_cases
+  forecasts_index: signal_dyad_forecasts
+
 retrieval:
-  es_index_cases: signal_icb_cases
-  es_index_forecasts: signal_dyad_forecasts
-  vector_dim: 32               # PCA dim of the 90-day run-up vector
+  vector_dim: 78               # 13 weeks x 6 z-scored GDELT features (see retrieval/vectors.py)
+  vector_scaler_fit_end: "2010-01-01"
   k: 5
   num_candidates: 200
-  # schema retriever weights (tuned only on training-period cases). Field -> weight.
+  # schema retriever weights (hand-set; ICB pre_onset / at_onset tiers only). Field -> boost.
   schema_weights:
     pre_onset:
       geog: 2.0
-      powdis: 1.5
+      powdissy: 1.5
       gpinv: 1.5
       powinv: 1.0
       regime_pair: 1.0
-      nuclear: 1.0
+      nuclear_max: 1.0
       protrac: 1.0
+      ethnic: 0.5
+      pcid: 0.5
     at_onset:
-      trigent: 2.0
-      issue: 1.5
+      trigent_type: 2.0
+      issues: 1.5
       gravcr: 1.5
       noactr: 0.5
   rrf_k: 60

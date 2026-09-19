@@ -47,14 +47,38 @@ Decisions taken without asking, with the reason.  Newest at the bottom.
 
 ## Modelling
 11. Walk-forward folds by year boundaries in `config.yaml`; training rows end 30 days before the
-    test window starts (label horizon gap).  Calibration (isotonic) fit on the last 20% of each
-    training window only.
+    validation window starts (label horizon gap).  Calibration (isotonic) is fit on the validation
+    slice only and applied to the later test slice.  The "final" model for the live demo is trained
+    on the first 85% of labelled time and calibrated on the last 15%, so every forecast after
+    2021-12-31 (end of complete ICB coverage) is strictly out-of-sample.
+11b. Isotonic calibration on a 0.05% base rate yields a step function with few levels (max
+    calibrated p about 5.6%).  The app shows the calibrated probability, a Wilson 80% band derived
+    from the validation rows in the same isotonic step, and the raw score's percentile rank among
+    all dyads that week.  We do not smooth or inflate the probabilities.
+11c. `days_since_icb_onset` / `icb_prior_crises` (history of *earlier* ICB crises for the dyad, as
+    of t) are legitimate pre-t features and are used; nothing about the crisis being forecast is.
 
 ## Retrieval
 12. Only `pre_onset` and `at_onset` ICB variables may enter schema retrieval; `ex_post` is
     display-only.  See `docs/icb_variable_tiers.md`.
-13. Vector = standardised 90-day pre-onset GDELT feature run-up (fixed weekly grid), same
-    function for historical cases and live queries.
+13. Vector = 13 weeks x 6 z-scored GDELT features (log events, QuadClass-3/4 shares, mean
+    Goldstein, mean tone, log volume-normalised rate) ending at the last Sunday <= query date; 78
+    dims, no PCA (config originally said 32-d PCA; a fixed linear map fit on all cases would leak
+    future cases into the basis).  z-score constants are fit on dyad-weeks before 2010-01-01 and frozen.
+13b. Case documents are one per crisis-dyad (771 docs for 512 crises).  Retrievers de-duplicate by
+    crisis id client-side.  Pre-1979 crises have no vector and are only reachable via schema search.
+13c. `regime_pair`, `nuclear_max`, `powsta_max` are aggregated from ICB actor-level rows and are
+    pre-onset attributes of the actors, not outcomes.
+
+## Prediction markets
+16. Markets are collected from Polymarket (Gamma + CLOB price history) and Kalshi public APIs,
+    filtered to resolved binary Yes/No questions with escalation keywords and >= 2 detectable
+    countries (keyword aliases, `markets/collect.py`); mapping is written to
+    `data/processed/markets/market_dyad_map.csv` for inspection.
+17. Market questions ("Will X strike Y by <date>?") are not the ICB-onset label.  The comparison
+    treats the market's resolution as the outcome and the model's calibrated escalation probability
+    for the dyad at the snapshot date as its forecast.  It is a *signal* comparison, reported with
+    n and without claiming either side "wins" beyond what the Brier scores show.
 
 ## Infra
 14. Analytical source of truth is parquet under `data/processed/`; Elasticsearch holds only the
