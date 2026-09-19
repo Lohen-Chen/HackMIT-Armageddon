@@ -13,7 +13,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pandas as pd
 import requests
@@ -112,8 +112,14 @@ def poly_markets():
 
 
 def poly_history(token_id):
+    cache = os.path.join(RAW, "poly_hist", f"{token_id}.json")
+    if os.path.exists(cache):
+        return json.load(open(cache))
     h = _get(f"{CLOB}/prices-history", {"market": token_id, "interval": "max", "fidelity": 1440})
-    return (h or {}).get("history", [])
+    hist = (h or {}).get("history", [])
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    json.dump(hist, open(cache, "w"))
+    return hist
 
 
 def parse_poly(m):
@@ -149,7 +155,7 @@ def kalshi_markets():
     series = []
     for cat in ("Politics", "World", "Geopolitics"):
         s = _get(f"{KALSHI}/series", {"category": cat}) or {}
-        series += [x for x in s.get("series", []) if KALSHI_SERIES_KW.search(x.get("title", "") + " " + x["ticker"])]
+        series += [x for x in (s.get("series") or []) if KALSHI_SERIES_KW.search((x.get("title") or "") + " " + x["ticker"])]
     out = []
     for s in {x["ticker"]: x for x in series}.values():
         mk = _get(f"{KALSHI}/markets", {"series_ticker": s["ticker"], "status": "settled", "limit": 200}) or {}
@@ -204,8 +210,12 @@ def main():
     os.makedirs(OUT, exist_ok=True)
     rows = []
 
-    pm = poly_markets()
-    json.dump(pm, open(os.path.join(RAW, "polymarket_markets.json"), "w"))
+    pm_path = os.path.join(RAW, "polymarket_markets.json")
+    if os.path.exists(pm_path) and not os.environ.get("REFRESH_MARKETS"):
+        pm = json.load(open(pm_path))
+    else:
+        pm = poly_markets()
+        json.dump(pm, open(pm_path, "w"))
     print(f"polymarket closed markets fetched: {len(pm)}")
     for m in pm:
         r = parse_poly(m)
@@ -218,7 +228,12 @@ def main():
         rows.append(r)
     print(f"polymarket escalation binaries: {len(rows)} (with dyad: {sum(1 for r in rows if r['dyad'])})")
 
-    km = kalshi_markets()
+    _write(rows)
+    try:
+        km = kalshi_markets()
+    except Exception as e:  # noqa: BLE001 - Kalshi is optional; keep the Polymarket set
+        print("kalshi fetch failed:", e)
+        km = []
     json.dump(km, open(os.path.join(RAW, "kalshi_markets.json"), "w"))
     n0 = len(rows)
     for m in km:
@@ -233,7 +248,10 @@ def main():
         r.update(snapshot_prices(hist, r["resolution_time"]))
         rows.append(r)
     print(f"kalshi settled escalation markets: {len(rows) - n0}")
+    _write(rows)
 
+
+def _write(rows):
     df = pd.DataFrame(rows)
     df["resolution_time"] = pd.to_datetime(df["resolution_time"], utc=True, errors="coerce")
     df = df.dropna(subset=["resolution_time"])

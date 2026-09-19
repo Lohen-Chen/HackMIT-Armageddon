@@ -17,6 +17,9 @@ Conventions
     in ICB.  Regional pseudo-codes (AFR, EUR, MEA, ...) are excluded.
 * Windows: 1, 4, 13, 52 weeks (7 / 28 / 91 / 364 days).  The 30- and 90-day windows in the
   spec are approximated by 4 and 13 whole weeks so every row uses identical, gap-free windows.
+  The week grid is a dense calendar (every Sunday from the first to the last week of data): weeks
+  with no GDELT files at all (e.g. the 2025-06-15..2025-07-01 archive outage) are zero-filled, so a
+  k-week window always spans exactly 7k calendar days.
 """
 import argparse
 import os
@@ -71,10 +74,20 @@ def build(gdelt_out, out, cfg, threads=8, mem="24GB"):
     print("2/6 global weekly totals")
     con.execute(f"""
     CREATE TABLE week_tot AS
-    SELECT CAST(date_trunc('week', day) + INTERVAL 6 DAY AS DATE) AS t,
-           sum(n_events) AS tot_events, sum(n_mentions) AS tot_mentions, sum(q4) AS tot_q4
-    FROM read_parquet('{gdelt_out}/daily_totals/*.parquet') GROUP BY ALL
+    WITH raw AS (
+      SELECT CAST(date_trunc('week', day) + INTERVAL 6 DAY AS DATE) AS t,
+             sum(n_events) AS tot_events, sum(n_mentions) AS tot_mentions, sum(q4) AS tot_q4
+      FROM read_parquet('{gdelt_out}/daily_totals/*.parquet') GROUP BY ALL
+    ),
+    cal AS (
+      SELECT CAST(unnest(generate_series((SELECT min(t) FROM raw), (SELECT max(t) FROM raw), INTERVAL 7 DAY)) AS DATE) AS t
+    )
+    SELECT cal.t, coalesce(r.tot_events, 0) AS tot_events, coalesce(r.tot_mentions, 0) AS tot_mentions,
+           coalesce(r.tot_q4, 0) AS tot_q4
+    FROM cal LEFT JOIN raw r USING (t)
     """)
+    gap_weeks = con.execute("SELECT count(*) FROM week_tot WHERE tot_events = 0").fetchone()[0]
+    print(f"   weeks with no GDELT data (zero-filled): {gap_weeks}")
 
     print("3/6 dense grid + rolling windows")
     # dense grid per dyad from its first active week to the last week in the data
@@ -225,6 +238,7 @@ Built by `pipeline/features.py`.
 | Rows kept by the activity rule | {int(stats.rows_active):,} |
 | Rows kept only because the dyad is an ICB dyad | {int(stats.rows_icb_only):,} |
 | Date range of forecast dates | {stats.t_min} .. {stats.t_max} |
+| Calendar weeks with no GDELT files at all (zero-filled, windows stay 7k days) | {gap_weeks} |
 | Columns | {ncols} |
 
 The rule uses only trailing information (events in the 52 weeks up to and including the forecast

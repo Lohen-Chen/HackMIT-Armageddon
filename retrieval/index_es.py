@@ -1,6 +1,5 @@
 """Create the signal_icb_cases index and bulk-load data/artifacts/cases.jsonl."""
 import argparse
-import json
 import os
 
 import yaml

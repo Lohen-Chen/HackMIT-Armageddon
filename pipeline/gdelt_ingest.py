@@ -114,7 +114,7 @@ def build_sql(csv_path, is_daily, file_day, max_lag_days, dedupe):
     WHERE column01 IS NOT NULL AND length(column01)=8 {lag_filter}
     """
     if dedupe:
-        ev = f"""
+        ev = """
         SELECT day, sqldate, a1code, a1cc, a2code, a2cc, event_code, root_code, lat, lon,
                max(is_root) AS is_root, max(quad) AS quad, avg(goldstein) AS goldstein,
                max(mentions) AS mentions, max(articles) AS articles, avg(tone) AS tone
