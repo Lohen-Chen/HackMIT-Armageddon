@@ -206,6 +206,8 @@ export type Episode = {
   date: string
   question: string
   p_model: number
+  /** stacked_percentile: GDELT risk percentile re-fit (leave-one-out) on the other markets; calibrated_oos: walk-forward forecast */
+  model_kind: 'stacked_percentile' | 'calibrated_oos'
   p_model_raw: number
   model_pct?: number
   p_market: number | null

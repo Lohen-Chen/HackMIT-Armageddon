@@ -44,8 +44,8 @@ def R(rel: str) -> str:
             return os.path.join(DEMO, dst, rel[len(src):].lstrip("/"))
     return full
 
-FINAL_TRAIN_END = date(2018, 11, 25)      # trees trained on t < this (85% time quantile, see models/train.py)
-ICB_COMPLETE_END = date(2021, 12, 31)     # calibration slice ends here; everything after is fully out-of-sample
+# boundary of the shipped y_icb final model (t < t_cut - gap, models/train.py) when train_meta.json is absent
+FALLBACK_TRAIN_END = date(2018, 10, 26)
 
 
 def _sunday_on_or_before(d: date) -> date:
@@ -67,6 +67,7 @@ class Store:
         self.cfg = yaml.safe_load(open(P("config.yaml")))
         self.con = duckdb.connect()
         self.notes: List[str] = []
+        self.icb_end = date.fromisoformat(str(self.cfg["labels"]["icb_last_complete_date"]))
         self._load_countries()
         self._load_forecasts()
         self._load_cases()
@@ -127,11 +128,17 @@ class Store:
 
     def _load_model(self):
         import lightgbm as lgb
-        self.model, self.features, self.importance = {}, {}, {}
+        self.model, self.features, self.importance, self.train_end = {}, {}, {}, {}
         for label in self.labels:
             d = P("data/artifacts/models", label)
             self.model[label] = lgb.Booster(model_file=os.path.join(d, "final_model.txt"))
             self.features[label] = json.load(open(os.path.join(d, "features.json")))
+            meta = os.path.join(d, "train_meta.json")
+            if os.path.exists(meta):
+                self.train_end[label] = date.fromisoformat(json.load(open(meta))["final_train_end"])
+            else:
+                self.train_end[label] = FALLBACK_TRAIN_END
+                self.notes.append(f"{label}: train_meta.json missing, trees_out_of_sample boundary is the fallback {FALLBACK_TRAIN_END}")
             shp = os.path.join(d, "shap_summary.csv")
             if os.path.exists(shp):
                 s = pd.read_csv(shp)
@@ -183,14 +190,16 @@ class Store:
         w = _sunday_on_or_before(d)
         return max(self.t_min, min(self.t_max, w))
 
-    @staticmethod
-    def _horizon_coded(t: date) -> bool:
-        """True when the whole 30-day label horizon falls inside ICB coverage."""
-        return t + timedelta(days=30) <= ICB_COMPLETE_END
+    def _horizon_coded(self, t: date) -> bool:
+        """True when the whole label horizon falls inside ICB coverage."""
+        return t + timedelta(days=self.cfg["labels"]["horizon_days"]) <= self.icb_end
 
-    def _sample_flags(self, t: date) -> dict:
-        return {"trees_out_of_sample": t >= FINAL_TRAIN_END, "calibration_out_of_sample": t > ICB_COMPLETE_END,
+    def _sample_flags(self, t: date, label: str) -> dict:
+        return {"trees_out_of_sample": t >= self.train_end[label], "calibration_out_of_sample": t > self.icb_end,
                 "icb_label_available": self._horizon_coded(t)}
+
+    def _boundaries(self, label: str = "y_icb") -> dict:
+        return {"trees_train_end": str(self.train_end[label]), "icb_complete_end": str(self.icb_end)}
 
     # ------------------------------------------------------------------ queries
     @_locked
@@ -207,7 +216,8 @@ class Store:
                 "heroes": heroes, "retrieval_mode": self.retrieval_mode, "notes": self.notes,
                 "dyads": [{"dyad": d["dyad"], "label": self.dyad_label(d["dyad"])} for d in top],
                 "countries": self.countries, "metrics": pooled, "importance": self.importance,
-                "sample_boundaries": {"trees_train_end": str(FINAL_TRAIN_END), "icb_complete_end": str(ICB_COMPLETE_END)},
+                "sample_boundaries": self._boundaries(),
+                "trees_train_end_by_label": {l: str(d) for l, d in self.train_end.items()},
                 "has_markets": self.market_joined is not None}
 
     @_locked
@@ -258,7 +268,7 @@ class Store:
                   for c in self.onsets_by_dyad.get(dyad, [])
                   if date.fromisoformat(c["onset_date"]) <= end and date.fromisoformat(c["end_date"]) >= start]
         return {"dyad": dyad, "label": self.dyad_label(dyad), "points": pts, "onsets": onsets,
-                "sample_boundaries": {"trees_train_end": str(FINAL_TRAIN_END), "icb_complete_end": str(ICB_COMPLETE_END)}}
+                "sample_boundaries": self._boundaries(label)}
 
     @_locked
     def forecast(self, dyad: str, d: date, label: str = "y_icb", n_drivers: int = 8) -> dict:
@@ -274,12 +284,13 @@ class Store:
         out = {"dyad": dyad, "label": self.dyad_label(dyad), "t": str(t), "available": True,
                "p_raw": float(r.p_raw), "p_cal": float(r.p_cal), "p_lo": float(r.p_lo), "p_hi": float(r.p_hi),
                "in_crisis": bool(r.in_crisis), "y": None if pd.isna(r.y) else int(r.y),
-               "rank": int(r.n_above) + 1, "n_dyads": int(r.n_week), "flags": self._sample_flags(t)}
+               "rank": int(r.n_above) + 1, "n_dyads": int(r.n_week), "flags": self._sample_flags(t, label)}
         out["drivers"] = self.drivers(dyad, t, label, n_drivers)
         out["current_crisis"] = next(({"crisno": c["crisno"], "name": c["name"], "onset_date": c["onset_date"],
                                        "end_date": c["end_date"]} for c in self.onsets_by_dyad.get(dyad, [])
                                       if date.fromisoformat(c["onset_date"]) <= t <= date.fromisoformat(c["end_date"])), None)
-        nxt = [c for c in self.onsets_by_dyad.get(dyad, []) if t < date.fromisoformat(c["onset_date"]) <= t + timedelta(days=30)]
+        h = timedelta(days=self.cfg["labels"]["horizon_days"])
+        nxt = [c for c in self.onsets_by_dyad.get(dyad, []) if t < date.fromisoformat(c["onset_date"]) <= t + h]
         out["onset_within_30d"] = None if not self._horizon_coded(t) else (
             {"crisno": nxt[0]["crisno"], "name": nxt[0]["name"], "onset_date": nxt[0]["onset_date"]} if nxt else False)
         return out
@@ -429,7 +440,8 @@ class Store:
                 eps.append({"kind": "market", "dyad": r.dyad, "dyad_label": self.dyad_label(r.dyad),
                             "date": str(pd.Timestamp(r.snapshot_date).date()), "question": q,
                             "resolution_time": str(pd.Timestamp(r.resolution_time).date()),
-                            "p_model": float(r.p_stack_model), "p_model_raw": float(r.p_model), "model_pct": float(r.model_pct),
+                            "p_model": float(r.p_stack_model), "model_kind": "stacked_percentile",
+                            "p_model_raw": float(r.p_model), "model_pct": float(r.model_pct),
                             "p_market": float(r.p_market), "outcome": int(r.outcome_esc), "url": r.url})
         # historical ICB episodes: balanced positives / negatives, walk-forward OOS windows only
         need = n - len(eps)
@@ -449,7 +461,7 @@ class Store:
                         if t < date.fromisoformat(c["onset_date"]) <= t + timedelta(days=30)), None)
             eps.append({"kind": "icb", "dyad": r.dyad, "dyad_label": self.dyad_label(r.dyad), "date": str(t),
                         "question": f"Will an ICB-coded international crisis between {self.dyad_label(r.dyad)} begin in the 30 days after {t}?",
-                        "p_model": float(r.p_oos), "p_model_raw": float(r.p_raw), "p_market": None,
+                        "p_model": float(r.p_oos), "model_kind": "calibrated_oos", "p_model_raw": float(r.p_raw), "p_market": None,
                         "outcome": int(r.y), "crisis": None if nxt is None else nxt["name"]})
         rng.shuffle(eps)
         return eps[:n]

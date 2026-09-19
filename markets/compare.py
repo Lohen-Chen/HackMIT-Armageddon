@@ -25,6 +25,7 @@ import sys
 import duckdb
 import numpy as np
 import pandas as pd
+import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -47,6 +48,7 @@ NEGATION_KW = re.compile(r"\b(?:no|not|never|without)\b", re.I)
 # dated one-day markets ("... on February 27 (ET)?") are not 30-day-horizon questions
 DAILY_KW = re.compile(r"\bon (?:january|february|march|april|may|june|july|august|september|october|november|december) \d", re.I)
 
+# defaults mirror config.yaml `markets:`; main() reads the config, tests call select_markets() directly
 SNAP_DAYS = 30
 MAX_PER_EVENT = 1
 MAX_PER_DYAD = 5
@@ -67,17 +69,18 @@ def direction(question: str) -> int:
     return d
 
 
-def select_markets(m: pd.DataFrame) -> pd.DataFrame:
-    col = f"price_d{SNAP_DAYS}"
-    u = m[m.dyad.notna() & m[col].notna() & (m.volume >= MIN_VOLUME)].copy()
+def select_markets(m: pd.DataFrame, snap_days=SNAP_DAYS, max_per_event=MAX_PER_EVENT, max_per_dyad=MAX_PER_DYAD,
+                   min_volume=MIN_VOLUME) -> pd.DataFrame:
+    col = f"price_d{snap_days}"
+    u = m[m.dyad.notna() & m[col].notna() & (m.volume >= min_volume)].copy()
     u = u[u.question.str.contains(ESCALATION_KW, regex=True) & ~u.question.str.contains(DAILY_KW, regex=True)]
     u["direction"] = u.question.map(direction).astype(int)
     u["p_market"] = np.where(u.direction == 1, u[col], 1 - u[col]).astype(float)
     u["outcome_esc"] = np.where(u.direction == 1, u.outcome, 1 - u.outcome).astype(int)
     u = u.sort_values("volume", ascending=False)
-    u = u.groupby("event", group_keys=False).head(MAX_PER_EVENT)
-    u = u.groupby("dyad", group_keys=False).head(MAX_PER_DYAD)
-    u["snapshot_date"] = (pd.to_datetime(u.resolution_time, utc=True) - pd.Timedelta(days=SNAP_DAYS)).dt.tz_localize(None).dt.normalize()
+    u = u.groupby("event", group_keys=False).head(max_per_event)
+    u = u.groupby("dyad", group_keys=False).head(max_per_dyad)
+    u["snapshot_date"] = (pd.to_datetime(u.resolution_time, utc=True) - pd.Timedelta(days=snap_days)).dt.tz_localize(None).dt.normalize()
     return u.reset_index(drop=True)
 
 
@@ -138,15 +141,18 @@ def loo_stack(df: pd.DataFrame, cols):
 
 
 def main():
+    mc = yaml.safe_load(open(os.path.join(ROOT, "config.yaml")))["markets"]
+    snap_days, max_per_event = int(mc["snapshot_days_before_resolution"][0]), int(mc["max_per_event"])
+    max_per_dyad, min_volume = int(mc["max_per_dyad"]), float(mc["min_volume_usd"])
     m = pd.read_parquet(os.path.join(MK, "markets.parquet"))
-    u = select_markets(m)
+    u = select_markets(m, snap_days, max_per_event, max_per_dyad, min_volume)
     j = join_model(u)
     j["logit_market"] = logit(j.p_market)
     j["model_pct"] = j.model_pct.astype(float)
     j["logit_model"] = logit(j.p_model)
     print(f"markets after selection: {len(u)}; with model forecast in snapshot week: {len(j)}")
-    if len(j) < 10:
-        raise SystemExit("too few joined markets")
+    if len(j) < int(mc["min_markets"]):
+        raise SystemExit(f"too few joined markets ({len(j)} < {mc['min_markets']})")
 
     y = j.outcome_esc.to_numpy()
     base = float(y.mean())
@@ -157,7 +163,7 @@ def main():
     summary = {
         "n_markets": int(len(j)),
         "n_dyads": int(j.dyad.nunique()),
-        "snapshot_days_before": SNAP_DAYS,
+        "snapshot_days_before": snap_days,
         "base_rate": base,
         "brier": {
             "market": brier(j.p_market, y),
@@ -184,8 +190,8 @@ def main():
             "Ceasefire / 'war ends' markets are flipped so YES always means escalation.",
             "Markets are all from 2023-11 onward, i.e. after the ICB label window (through 2021-12-31): the model's trees and "
             "calibration are fully out-of-sample here.",
-            f"Selection: escalation keyword filter, volume >= ${MIN_VOLUME:,}, a price {SNAP_DAYS} days before resolution, "
-            f"at most {MAX_PER_EVENT} markets per event and {MAX_PER_DYAD} per country pair.",
+            f"Selection: escalation keyword filter, volume >= ${min_volume:,.0f}, a price {snap_days} days before resolution, "
+            f"at most {max_per_event} markets per event and {max_per_dyad} per country pair.",
             "Leave-one-out stacks refit a 1-2 parameter logistic on the other markets; with n this small the market-only vs "
             "market+model gap is indicative, not significant.",
         ],

@@ -32,6 +32,10 @@ def test_health_and_meta(client):
     assert len(m["heroes"]) >= 4 and {"ISR_LBN", "IND_PAK", "RUS_UKR"} <= {x["dyad"] for x in m["heroes"]}
     assert m["metrics"]["y_icb"]["model_raw"]["auc"] > 0.8
     assert m["metrics"]["y_icb"]["model_cal"]["brier"] <= m["metrics"]["y_icb"]["base_rate"]["brier"] * 1.01
+    # boundaries come from the tracked train_meta.json files and config.yaml, not module constants
+    assert m["sample_boundaries"] == {"trees_train_end": "2018-10-26", "icb_complete_end": "2021-12-31"}
+    assert m["trees_train_end_by_label"]["y_thresh"] == "2022-09-30"
+    assert not any("train_meta.json missing" in n for n in m["notes"])
 
 
 def test_map_is_ranked_and_snapped_to_sunday(client):
@@ -115,4 +119,6 @@ def test_markets_and_game(client):
         assert r["snapshot_date"] < r["resolution_time"]
     g = client.get("/api/game/episodes", params={"n": 8, "seed": 1}).json()["episodes"]
     assert len(g) == 8 and {e["kind"] for e in g} <= {"icb", "market"}
+    for e in g:
+        assert e["model_kind"] == ("stacked_percentile" if e["kind"] == "market" else "calibrated_oos")
     assert client.get("/api/game/episodes", params={"n": 8, "seed": 1}).json()["episodes"] == g
