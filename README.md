@@ -86,18 +86,18 @@ Primary label `y_icb` — ICB crisis onset for the dyad within 30 days (411 posi
 
 | model | Brier | log-loss | AUC | AP |
 |---|---|---|---|---|
-| LightGBM raw | 0.000301 | 0.00226 | **0.905** | 0.0072 |
-| LightGBM + isotonic | 0.000300 | 0.00239 | 0.875 | 0.0056 |
+| LightGBM raw | 0.000301 | 0.00226 | **0.904** | 0.0074 |
+| LightGBM + isotonic | 0.000300 | 0.00236 | 0.879 | 0.0057 |
 | persistence (last week's ICB state) | 0.000300 | 0.00250 | 0.868 | 0.0066 |
-| logistic (same features) | 0.000689 | 0.00447 | 0.779 | 0.0130 |
+| logistic (same features) | 0.000689 | 0.00446 | 0.780 | 0.0132 |
 | base rate | 0.000301 | 0.00294 | 0.637 | 0.0007 |
 
 Secondary label `y_thresh` — QuadClass-4 events in the next 30 days ≥ 3× trailing-year rate and ≥ 20 (2.5 % base rate):
 
 | model | Brier | log-loss | AUC | AP |
 |---|---|---|---|---|
-| LightGBM raw | 0.02398 | 0.1060 | 0.770 | 0.131 |
-| LightGBM + isotonic | **0.02396** | 0.1059 | 0.774 | 0.130 |
+| LightGBM raw | 0.02397 | 0.1060 | 0.770 | 0.131 |
+| LightGBM + isotonic | **0.02396** | 0.1059 | 0.774 | 0.131 |
 | persistence | 0.02496 | 0.1179 | 0.562 | 0.049 |
 | logistic | 0.02666 | 0.1251 | 0.675 | 0.065 |
 | base rate | 0.02537 | 0.1218 | 0.498 | 0.026 |
@@ -108,16 +108,17 @@ p ≈ 4-6 %). Per-fold numbers, calibration curves, PR curves/operating points, 
 and SHAP are in `data/artifacts/models/<label>/` (`metrics.json`, `calibration.json`,
 `pr_curve.json`, `shap_summary.csv`) and surfaced in the app.
 
-**Retrieval head-to-head** (`docs/retrieval_eval.md`, 97 held-out post-1995 crises, k = 5): ES hybrid
+**Retrieval head-to-head** (`docs/retrieval_eval.md`, 96 held-out post-1995 crises, k = 5): ES hybrid
 gets 0.49 violence-severity agreement vs 0.17 for the majority-prior baseline; schema search
 dominates region hit-rate, vector search is the cheapest; every returned analog satisfies
 `end_date < query_date` (asserted at run time).
 
 **Prediction markets** (`markets/compare.py`, 60 resolved Polymarket escalation/ceasefire questions
-over 20 dyads, 2023-11 → 2025, price snapshot 30 days before resolution): market Brier 0.250,
-base-rate 0.249, model-as-answer-to-the-market-question 0.458 (the model forecasts *ICB onsets*, not
-"strike by Friday" questions — this diagnostic is shown, not spun). The fair test is the
-leave-one-out logistic stack: market-only 0.2195 vs market + model 0.2194 — the GDELT signal adds
+over 20 dyads, 2023-11 → 2025, price snapshot 30 days before resolution; ceasefire questions *and*
+negated questions such as "Will **no** US × Venezuela military engagement occur?" are re-oriented so
+YES = escalation): market Brier 0.250, base-rate 0.248, model-as-answer-to-the-market-question 0.443
+(the model forecasts *ICB onsets*, not "strike by Friday" questions — this diagnostic is shown, not
+spun). The fair test is the leave-one-out logistic stack: market-only 0.2222 vs market + model 0.2221 — the GDELT signal adds
 essentially nothing on top of markets for these questions, and we say so in the UI. Nothing here
 supports a claim that either side "beats" the other.
 

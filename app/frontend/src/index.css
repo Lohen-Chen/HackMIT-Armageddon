@@ -260,6 +260,8 @@ input[type='range'] {
   display: grid;
   grid-template-columns: 1fr;
   gap: 10px;
+  position: relative;
+  z-index: 5; /* search dropdown must overlay the cards below */
 }
 .row {
   display: flex;

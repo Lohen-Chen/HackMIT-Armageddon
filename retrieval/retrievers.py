@@ -51,17 +51,16 @@ class FaissVectorRetriever:
         import faiss
         v = np.asarray(q.vector, dtype=np.float32).reshape(1, -1).copy()
         faiss.normalize_L2(v)
-        n = min(len(self.cases), max(k * 20, 100))
-        scores, idx = self.index.search(v, n)
-        qd = q.query_date.toordinal()
-        out = []
-        for s, i in zip(scores[0], idx[0]):
-            if i < 0 or self.end_dates[i] >= qd:
-                continue
-            c = self.cases[i]
-            if q.exclude_crisno is not None and c["crisno"] == q.exclude_crisno:
-                continue
-            out.append(_analog(c, s, "vector"))
+        # date filter inside the search (like the ES knn.filter) so future cases never consume the candidate budget
+        eligible = np.flatnonzero(self.end_dates < q.query_date.toordinal()).astype(np.int64)
+        if q.exclude_crisno is not None:
+            eligible = np.array([i for i in eligible if self.cases[i]["crisno"] != q.exclude_crisno], dtype=np.int64)
+        if len(eligible) == 0:
+            return []
+        n = min(len(eligible), max(k * 20, 100))
+        params = faiss.SearchParameters(sel=faiss.IDSelectorBatch(eligible))
+        scores, idx = self.index.search(v, n, params=params)
+        out = [_analog(self.cases[i], s, "vector") for s, i in zip(scores[0], idx[0]) if i >= 0]
         return dedupe_by_crisno(out, k)
 
 

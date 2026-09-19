@@ -23,7 +23,7 @@ Updated continuously; newest at the top.
 - **M5 markets**: `markets/collect.py` (Polymarket Gamma + CLOB history, Kalshi; 2,438 Polymarket rows) and
   `markets/compare.py` (60 resolved escalation/ceasefire questions, 20 dyads, 30-day-before snapshot,
   ceasefire questions inverted so YES = escalation, market/base-rate/model Brier + leave-one-out logistic
-  stack market-only vs market+model).  Result: market 0.251, base 0.249, LOO stack 0.219 vs 0.219 - GDELT
+  stack market-only vs market+model).  Result: market 0.250, base 0.248, LOO stack 0.222 vs 0.222 - GDELT
   adds ~nothing on top of markets for these questions; reported as such.
 - **M4 retrieval**: `retrieval/` — 13-week run-up vector (78-d, z-scored on pre-2010 stats), 771 case docs
   (512 crises, 268 with vectors) indexed into `signal_icb_cases`; Faiss/ES vector, ES/local schema,
