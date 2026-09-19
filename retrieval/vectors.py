@@ -32,11 +32,12 @@ def weekly_frame(con, dyad, end_date, n_weeks=N_WEEKS):
     end_date = pd.Timestamp(end_date)
     last_sunday = end_date - pd.Timedelta(days=(end_date.weekday() + 1) % 7)
     first = last_sunday - pd.Timedelta(weeks=n_weeks - 1)
-    df = con.execute(f"""
-        WITH weeks AS (SELECT t, tot_events FROM wt WHERE t BETWEEN DATE '{first.date()}' AND DATE '{last_sunday.date()}')
+    df = con.execute("""
+        WITH weeks AS (SELECT t, tot_events FROM wt WHERE t BETWEEN ? AND ?)
         SELECT w.t, coalesce(d.n_events,0) AS n_events, coalesce(d.q4,0) AS q4, coalesce(d.q3,0) AS q3,
                coalesce(d.goldstein_sum,0) AS goldstein_sum, coalesce(d.tone_sum,0) AS tone_sum, w.tot_events
-        FROM weeks w LEFT JOIN dw d ON d.t = w.t AND d.dyad = '{dyad}' ORDER BY w.t""").df()
+        FROM weeks w LEFT JOIN dw d ON d.t = w.t AND d.dyad = ? ORDER BY w.t""",
+                     [first.date(), last_sunday.date(), dyad]).df()
     # pad missing weeks (before data starts) with zeros
     if len(df) < n_weeks:
         pad = pd.DataFrame({"t": pd.date_range(first, periods=n_weeks - len(df), freq="7D")})

@@ -78,6 +78,33 @@ def test_analogs_respect_query_date(client):
 def test_bad_inputs(client):
     assert client.get("/api/map", params={"date": "yesterday"}).status_code == 400
     assert client.get("/api/map", params={"date": "2020-01-01", "label": "y_nope"}).status_code == 400
+    assert client.get("/api/dyad/ISR/analogs", params={"date": "2006-07-05"}).status_code == 400
+    assert client.get("/api/dyad/ISR_LBN'%20OR%20'1'='1/analogs", params={"date": "2006-07-05"}).status_code == 400
+    assert client.get("/api/dyad/isr_lbn/forecast", params={"date": "2006-07-09"}).status_code == 200
+
+
+def test_spa_fallback_blocks_traversal_and_unknown_api(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.main import mount_frontend
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html>spa</html>")
+    (dist / "assets" / "a.js").write_text("1")
+    (tmp_path / "config.yaml").write_text("secret: 1\n")
+
+    a = FastAPI()
+    assert mount_frontend(a, str(dist))
+    with TestClient(a) as c:
+        for p in ("/../../config.yaml", "/..%2F..%2Fconfig.yaml", "/%2E%2E/config.yaml"):
+            r = c.get(p)
+            assert r.status_code in (200, 404), p
+            assert "secret" not in r.text, p
+        assert c.get("/some/route").text == "<html>spa</html>"
+        assert c.get("/assets/a.js").text == "1"
+        assert c.get("/api/nope").status_code == 404
 
 
 def test_markets_and_game(client):
