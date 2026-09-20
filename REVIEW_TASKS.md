@@ -270,24 +270,30 @@ stay as explicit disables), add `npm run lint` to the `frontend` job in
 
 **Accept.** `npm run lint` exits 0; CI green.
 
-### C5. Move the demo pack out of git history (Git LFS)
+### C5. Demo pack distribution — SKIP for now (owner will handle manually)
+
+**Do not implement this task.** It is recorded here so the decision is visible.
 
 **Problem.** `data/artifacts/demo/` is ~140 MB and has been committed twice; `.git` is already
 275 MB. Every `make pack` adds another copy.
 
-**Do (this PR only, do not rewrite history).**
-1. `git lfs install`; add `.gitattributes` with
-   `data/artifacts/demo/**/*.parquet filter=lfs diff=lfs merge=lfs -text` and the same for
-   `data/artifacts/cases.jsonl` and `data/artifacts/models/*/final_model.txt`.
-2. `git lfs migrate import --no-rewrite --include="data/artifacts/demo/**/*.parquet,data/artifacts/cases.jsonl,data/artifacts/models/*/final_model.txt"`
-   so the current tips become LFS pointers without rewriting old commits.
-3. Update `.github/workflows/ci.yml` checkout steps with `lfs: true`.
-4. README "One-command demo": note that Git LFS is required (`git lfs install` before clone) and
-   that `git clone` without LFS gets pointer files, in which case `git lfs pull` fetches them.
-5. Leave a note in `docs/STATUS.md` that a history rewrite (`git lfs migrate import` without
-   `--no-rewrite`) would shrink `.git` from 275 MB but must be coordinated with all clones.
+**Why not Git LFS.** The pack is already in history, so converting the tip to LFS pointers
+without a history rewrite does not shrink clones. It would only prevent future copies, while
+every CI run with `lfs: true` and every fresh clone would draw on the GitHub LFS bandwidth quota
+(1 GB/month on free plans, i.e. about seven CI runs). LFS objects also cannot be deleted without
+a support request.
 
-**Accept.** Fresh `git clone` + `git lfs pull` + `make test` passes; CI green.
+**Planned approach (owner, manual, later).**
+1. Publish `demo_pack.tar.zst` (contents of `data/artifacts/demo/` plus `cases.jsonl`) as a
+   GitHub Release asset.
+2. Add a `make demo-pack` target that downloads and extracts it when `data/artifacts/demo/` is
+   absent, with a SHA-256 check; `make demo` and `make test` depend on it.
+3. Cache the archive in CI with `actions/cache` keyed on the release tag.
+4. Stop tracking `data/artifacts/demo/` (`.gitignore` already ignores `*.parquet`; remove the
+   `!data/artifacts/demo/**` exception).
+5. Only after all clones are aware, rewrite history to drop the two committed copies.
+
+**Accept.** N/A for this batch.
 
 ### C6. Small cleanups (one PR)
 
