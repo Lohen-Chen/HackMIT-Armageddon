@@ -1,0 +1,2 @@
+# data artifacts are byte-exact inputs (LightGBM model text, jsonl, csv); never eol-normalize them
+data/** -text
