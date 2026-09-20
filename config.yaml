@@ -68,11 +68,11 @@ retrieval:
       protrac: 1.0
       ethnic: 0.5
       pcid: 0.5
+      noactr: 0.5
     at_onset:
       trigent_type: 2.0
       issues: 1.5
       gravcr: 1.5
-      noactr: 0.5
   rrf_k: 60
 
 markets:

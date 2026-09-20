@@ -41,7 +41,7 @@ SUM_COLS = ["n_events", "n_mentions", "n_articles", "n_root", "goldstein_sum", "
            [f"r{c}" for c in ROOT_KEEP] + [f"m{c}" for c in ROOT_KEEP]
 
 
-def build(gdelt_out, out, cfg, threads=8, mem="24GB"):
+def build(gdelt_out, out, cfg, threads=8, mem="24GB", icb_dyads=None):
     os.makedirs(out, exist_ok=True)
     con = duckdb.connect()
     con.execute(f"PRAGMA threads={threads}")
@@ -49,7 +49,7 @@ def build(gdelt_out, out, cfg, threads=8, mem="24GB"):
     con.execute(f"PRAGMA temp_directory='{os.path.join(out, 'duck_tmp')}'")
     min_ev = cfg["panel"]["min_trailing_events_365d"]
     pseudo = ",".join(f"'{p}'" for p in sorted(set(PSEUDO)))
-    icb_dyads = os.path.join(ROOT, "data", "processed", "icb", "dyads.parquet")
+    icb_dyads = icb_dyads or os.path.join(ROOT, "data", "processed", "icb", "dyads.parquet")
 
     sums = ",\n".join(f"sum({c}) AS {c}" for c in SUM_COLS)
     print("1/6 undirected dyad-week sums")
