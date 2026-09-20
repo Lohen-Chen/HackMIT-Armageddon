@@ -6,6 +6,9 @@ human-coded **ICB** crisis dataset, explained with SHAP drivers, contextualised 
 analogs retrieved from Elasticsearch** (vector + schema + hybrid), and benchmarked against
 **prediction markets** — all replayable week by week in a browser.
 
+New here? `docs/EXPLANATION.md` explains in plain language what every number, flag and acronym in
+the app means (what the percentage is, what "top 3 %" means, what ICB/GDELT/Brier are).
+
 ![explorer](docs/screenshots/explorer_isr_lbn_2006.png)
 
 ## One-command demo
