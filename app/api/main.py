@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from contextlib import asynccontextmanager
 from datetime import date
 from typing import Optional
 
@@ -22,16 +23,19 @@ from app.api.store import Store
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 log = logging.getLogger("signal.api")
 
-app = FastAPI(title="Signal in the Noise", version="0.1")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 store: Optional[Store] = None
 
 
-@app.on_event("startup")
-def _startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     global store
     store = Store()
     log.info("store ready: %d dyads, %s..%s, retrieval=%s", len(store.dyads), store.t_min, store.t_max, store.retrieval_mode)
+    yield
+
+
+app = FastAPI(title="Signal in the Noise", version="0.1", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 def _store() -> Store:

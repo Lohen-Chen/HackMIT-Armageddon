@@ -2,9 +2,9 @@
 
 Streams every GDELT 1.0 event file (yearly 1979-2005, monthly 2006-2013/03, daily
 2013-04-01 -> present) from data.gdeltproject.org, aggregates it with DuckDB to
-(day, actor1_cc, actor2_cc) rows plus per-day / per-country totals, writes one
-Parquet per source file and deletes the raw CSV.  Resumable: files whose three outputs
-all exist are skipped (dyad_day is written last, so a partial run never looks complete).
+(day, actor1_cc, actor2_cc) rows plus per-day totals, writes one
+Parquet per source file and deletes the raw CSV.  Resumable: files whose two outputs
+both exist are skipped (dyad_day is written last, so a partial run never looks complete).
 Works with Python 3.9 (compute instance) and 3.10+.
 
     python pipeline/gdelt_ingest.py --workdir /dev/shm/gdelt --workers 16
@@ -39,7 +39,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CFG = yaml.safe_load(open(os.path.join(ROOT, "config.yaml")))["gdelt"]
 BASE_URL = CFG["base_url"]
 FILESIZES_URL = CFG["filesizes_url"]
-OUTPUTS = ("daily_totals", "country_day", "dyad_day")   # dyad_day (the primary output) last
+OUTPUTS = ("daily_totals", "dyad_day")   # dyad_day (the primary output) last
 
 # CAMEO root codes 01..20
 ROOT_CODES = ["%02d" % i for i in range(1, 21)]
@@ -83,7 +83,7 @@ def _download(url, dest, retries=5):
 
 
 def build_sql(csv_path, is_daily, file_day, max_lag_days, dedupe):
-    """SQL producing the three aggregate tables from one raw CSV."""
+    """SQL producing the two aggregate tables (dyad_day, daily_totals) from one raw CSV."""
     # column indices (0-based) in GDELT 1.0
     # 0 id, 1 SQLDATE, 5 Actor1Code, 7 Actor1CountryCode, 15 Actor2Code, 17 Actor2CountryCode,
     # 25 IsRootEvent, 26 EventCode, 28 EventRootCode, 29 QuadClass, 30 Goldstein, 31 NumMentions,
@@ -156,16 +156,7 @@ def build_sql(csv_path, is_daily, file_day, max_lag_days, dedupe):
            count(*) FILTER (quad=4) AS q4, count(*) FILTER (quad=3) AS q3
     FROM ev WHERE day IS NOT NULL GROUP BY ALL
     """
-    country = """
-    SELECT day, cc, count(*) AS n_events, sum(mentions) AS n_mentions,
-           count(*) FILTER (quad=4) AS q4, count(*) FILTER (quad=3) AS q3,
-           sum(goldstein) AS goldstein_sum, sum(tone) AS tone_sum
-    FROM (SELECT day, a1cc AS cc, quad, mentions, goldstein, tone FROM ev WHERE a1cc IS NOT NULL
-          UNION ALL
-          SELECT day, a2cc AS cc, quad, mentions, goldstein, tone FROM ev WHERE a2cc IS NOT NULL)
-    WHERE day IS NOT NULL GROUP BY ALL
-    """
-    return raw, ev, dyad, daily, country
+    return raw, ev, dyad, daily
 
 
 def process_file(name, workdir, outdir, threads=3, max_lag_days=7, dedupe=True):
@@ -184,10 +175,10 @@ def process_file(name, workdir, outdir, threads=3, max_lag_days=7, dedupe=True):
     con = duckdb.connect()
     con.execute(f"PRAGMA threads={threads}")
     con.execute("PRAGMA memory_limit='6GB'")
-    raw, ev, dyad, daily, country = build_sql(csv_path, is_daily, stem, max_lag_days, dedupe)
+    raw, ev, dyad, daily = build_sql(csv_path, is_daily, stem, max_lag_days, dedupe)
     con.execute(f"CREATE TEMP TABLE ev AS WITH raw AS ({raw}) {ev}")
     n = con.execute("SELECT count(*) FROM ev").fetchone()[0]
-    sqls = {"dyad_day": dyad, "daily_totals": daily, "country_day": country}
+    sqls = {"dyad_day": dyad, "daily_totals": daily}
     for sub in OUTPUTS:
         sql = sqls[sub]
         os.makedirs(os.path.join(outdir, sub), exist_ok=True)
