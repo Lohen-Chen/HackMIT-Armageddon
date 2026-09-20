@@ -128,16 +128,18 @@ class Store:
 
     def _load_model(self):
         import lightgbm as lgb
-        self.model, self.features, self.importance, self.train_end = {}, {}, {}, {}
+        self.model, self.features, self.importance, self.train_end, self.cal_end = {}, {}, {}, {}, {}
         for label in self.labels:
             d = P("data/artifacts/models", label)
             self.model[label] = lgb.Booster(model_file=os.path.join(d, "final_model.txt"))
             self.features[label] = json.load(open(os.path.join(d, "features.json")))
             meta = os.path.join(d, "train_meta.json")
             if os.path.exists(meta):
-                self.train_end[label] = date.fromisoformat(json.load(open(meta))["final_train_end"])
+                tm = json.load(open(meta))
+                self.train_end[label] = date.fromisoformat(tm["final_train_end"])
+                self.cal_end[label] = date.fromisoformat(tm.get("final_calibration_end", str(self.icb_end)))
             else:
-                self.train_end[label] = FALLBACK_TRAIN_END
+                self.train_end[label], self.cal_end[label] = FALLBACK_TRAIN_END, self.icb_end
                 self.notes.append(f"{label}: train_meta.json missing, trees_out_of_sample boundary is the fallback {FALLBACK_TRAIN_END}")
             shp = os.path.join(d, "shap_summary.csv")
             if os.path.exists(shp):
@@ -195,11 +197,12 @@ class Store:
         return t + timedelta(days=self.cfg["labels"]["horizon_days"]) <= self.icb_end
 
     def _sample_flags(self, t: date, label: str) -> dict:
-        return {"trees_out_of_sample": t >= self.train_end[label], "calibration_out_of_sample": t > self.icb_end,
+        return {"trees_out_of_sample": t >= self.train_end[label], "calibration_out_of_sample": t > self.cal_end[label],
                 "icb_label_available": self._horizon_coded(t)}
 
     def _boundaries(self, label: str = "y_icb") -> dict:
-        return {"trees_train_end": str(self.train_end[label]), "icb_complete_end": str(self.icb_end)}
+        return {"trees_train_end": str(self.train_end[label]), "calibration_end": str(self.cal_end[label]),
+                "icb_complete_end": str(self.icb_end)}
 
     # ------------------------------------------------------------------ queries
     @_locked
@@ -217,7 +220,7 @@ class Store:
                 "dyads": [{"dyad": d["dyad"], "label": self.dyad_label(d["dyad"])} for d in top],
                 "countries": self.countries, "metrics": pooled, "importance": self.importance,
                 "sample_boundaries": self._boundaries(),
-                "trees_train_end_by_label": {l: str(d) for l, d in self.train_end.items()},
+                "sample_boundaries_by_label": {l: self._boundaries(l) for l in self.labels},
                 "has_markets": self.market_joined is not None}
 
     @_locked

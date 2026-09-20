@@ -119,10 +119,6 @@ def run(panel_path, label, cfg, outdir, max_rows=None):
     print(f"label={label} rows={len(df):,} pos={y_all.sum():,} ({y_all.mean():.4%}) features={len(feats)}")
     # final-model split (used after the folds): last 15% of time is the calibration slice
     t_cut = df["t"].quantile(0.85)
-    final_meta = {"final_train_end": str((t_cut - gap).date()), "final_calibration_start": str(t_cut.date()),
-                  "gap_days": int(cfg["model"]["gap_days"]), "seed": int(seed)}
-    with open(os.path.join(outdir, "train_meta.json"), "w") as f:
-        json.dump(final_meta, f, indent=1)
 
     # persistence baseline: for y_thresh use "did it happen in the last 4 weeks", for y_icb
     # use a hazard proxy: 1/(1+days since last ICB onset)  (both are pre-t information)
@@ -176,9 +172,6 @@ def run(panel_path, label, cfg, outdir, max_rows=None):
     pooled = {name: metrics(P["y"], P[col]) for name, col in
               [("model_raw", "p_raw"), ("model_cal", "p_cal"), ("base_rate", "p_base"),
                ("persistence", "p_persist"), ("logistic", "p_logit")]}
-    with open(os.path.join(outdir, "metrics.json"), "w") as f:
-        json.dump({"label": label, "n_features": len(feats), "folds": fold_metrics, "pooled": pooled,
-                   "final": final_meta}, f, indent=1)
     with open(os.path.join(outdir, "calibration.json"), "w") as f:
         json.dump({"model_cal": reliability(P["y"].values, P["p_cal"].values),
                    "model_raw": reliability(P["y"].values, P["p_raw"].values),
@@ -201,6 +194,16 @@ def run(panel_path, label, cfg, outdir, max_rows=None):
     m.save_model(os.path.join(outdir, "final_model.txt"), num_iteration=m.best_iteration)
     with open(os.path.join(outdir, "final_calibrator.pkl"), "wb") as f:
         pickle.dump(cal, f)
+    # written only once the model + calibrator it describes are on disk, so a failed run never
+    # pairs the previous artifacts with this run's boundaries
+    final_meta = {"final_train_end": str((t_cut - gap).date()), "final_calibration_start": str(t_cut.date()),
+                  "final_calibration_end": str(df.loc[va, "t"].max().date()),
+                  "gap_days": int(cfg["model"]["gap_days"]), "seed": int(seed)}
+    with open(os.path.join(outdir, "train_meta.json"), "w") as f:
+        json.dump(final_meta, f, indent=1)
+    with open(os.path.join(outdir, "metrics.json"), "w") as f:
+        json.dump({"label": label, "n_features": len(feats), "folds": fold_metrics, "pooled": pooled,
+                   "final": final_meta}, f, indent=1)
 
     # ---- SHAP on a sample of recent rows
     try:
