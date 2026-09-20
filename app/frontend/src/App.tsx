@@ -214,8 +214,10 @@ export default function App() {
       </main>
       <div className="footer-note">
         Data: GDELT 1.0 events (1979–present, noisy machine-coded news) · ICB v16 crisis dataset (human-coded, complete through{' '}
-        {meta.sample_boundaries.icb_complete_end}) · Polymarket & Kalshi resolved markets. Final model trees trained through{' '}
-        {meta.sample_boundaries.trees_train_end}; later dates are out-of-sample for the trees. Retrieval never returns a crisis that
+        {meta.sample_boundaries.icb_complete_end}) · Polymarket & Kalshi resolved markets. Final {label} trees trained through{' '}
+        {(meta.sample_boundaries_by_label[label] ?? meta.sample_boundaries).trees_train_end}; calibration fitted through{' '}
+        {(meta.sample_boundaries_by_label[label] ?? meta.sample_boundaries).calibration_end}; later dates are out-of-sample.
+        Retrieval never returns a crisis that
         had not ended by the forecast date.
       </div>
     </div>

@@ -90,9 +90,12 @@ def forecast(dyad: str, date: str, label: str = "y_icb"):
 
 
 @app.get("/api/dyad/{dyad}/analogs")
-def analogs(dyad: str, date: str, k: int = 5):
+def analogs(dyad: str, date: str, k: Optional[int] = None):
+    s = _store()
+    if k is None:
+        k = int(s.cfg["retrieval"]["k"])
     try:
-        return _store().analogs(_dyad(dyad), _date(date), min(max(k, 1), 10))
+        return s.analogs(_dyad(dyad), _date(date), min(max(k, 1), 10))
     except AssertionError:
         raise HTTPException(500, "retrieval invariant violated (end_date >= query_date)")
 

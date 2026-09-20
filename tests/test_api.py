@@ -32,6 +32,12 @@ def test_health_and_meta(client):
     assert len(m["heroes"]) >= 4 and {"ISR_LBN", "IND_PAK", "RUS_UKR"} <= {x["dyad"] for x in m["heroes"]}
     assert m["metrics"]["y_icb"]["model_raw"]["auc"] > 0.8
     assert m["metrics"]["y_icb"]["model_cal"]["brier"] <= m["metrics"]["y_icb"]["base_rate"]["brier"] * 1.01
+    # boundaries come from the tracked train_meta.json files and config.yaml, not module constants
+    assert m["sample_boundaries"] == {"trees_train_end": "2018-10-26", "calibration_end": "2021-11-28",
+                                      "icb_complete_end": "2021-12-31"}
+    assert m["sample_boundaries_by_label"]["y_thresh"] == {"trees_train_end": "2022-09-30", "calibration_end": "2026-09-13",
+                                                            "icb_complete_end": "2021-12-31"}
+    assert not any("train_meta.json missing" in n for n in m["notes"])
 
 
 def test_map_is_ranked_and_snapped_to_sunday(client):
@@ -52,6 +58,10 @@ def test_forecast_flags_and_realised_label(client):
     g = client.get("/api/dyad/CHN_TWN/forecast", params={"date": "2024-07-28", "label": "y_icb"}).json()
     assert g["flags"] == {"trees_out_of_sample": True, "calibration_out_of_sample": True, "icb_label_available": False}
     assert g["onset_within_30d"] is None
+
+    # y_thresh has its own boundaries: 2023 is inside its calibration slice but past the ICB label horizon
+    s = client.get("/api/dyad/CHN_TWN/forecast", params={"date": "2023-01-01", "label": "y_thresh"}).json()
+    assert s["flags"] == {"trees_out_of_sample": True, "calibration_out_of_sample": False, "icb_label_available": False}
 
     u = client.get("/api/dyad/AAA_BBB/forecast", params={"date": "2024-07-28"}).json()
     assert u["available"] is False
@@ -115,4 +125,6 @@ def test_markets_and_game(client):
         assert r["snapshot_date"] < r["resolution_time"]
     g = client.get("/api/game/episodes", params={"n": 8, "seed": 1}).json()["episodes"]
     assert len(g) == 8 and {e["kind"] for e in g} <= {"icb", "market"}
+    for e in g:
+        assert e["model_kind"] == ("stacked_percentile" if e["kind"] == "market" else "calibrated_oos")
     assert client.get("/api/game/episodes", params={"n": 8, "seed": 1}).json()["episodes"] == g

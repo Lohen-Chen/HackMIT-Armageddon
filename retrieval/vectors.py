@@ -3,7 +3,7 @@
 vector = z-scored [log1p(n_events), q4_share, q3_share, goldstein_mean, tone_mean, log1p(1e6*rate)]
          for each of the 13 weeks ending at the last Sunday <= end_date  -> 78 dims.
 Only weeks with t <= end_date are used.  The z-score constants are fit on panel rows with
-t < scaler_fit_end (default 2010-01-01) and frozen in data/artifacts/vector_scaler.json.
+t < retrieval.vector_scaler_fit_end (config.yaml) and frozen in data/artifacts/vector_scaler.json.
 """
 import json
 import os
@@ -11,6 +11,7 @@ import os
 import duckdb
 import numpy as np
 import pandas as pd
+import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PANEL_DIR = os.path.join(ROOT, "data", "processed", "panel")
@@ -32,16 +33,16 @@ def weekly_frame(con, dyad, end_date, n_weeks=N_WEEKS):
     end_date = pd.Timestamp(end_date)
     last_sunday = end_date - pd.Timedelta(days=(end_date.weekday() + 1) % 7)
     first = last_sunday - pd.Timedelta(weeks=n_weeks - 1)
+    cal = pd.DataFrame({"t": pd.date_range(first, last_sunday, freq="7D")})
     df = con.execute("""
         WITH weeks AS (SELECT t, tot_events FROM wt WHERE t BETWEEN ? AND ?)
         SELECT w.t, coalesce(d.n_events,0) AS n_events, coalesce(d.q4,0) AS q4, coalesce(d.q3,0) AS q3,
                coalesce(d.goldstein_sum,0) AS goldstein_sum, coalesce(d.tone_sum,0) AS tone_sum, w.tot_events
         FROM weeks w LEFT JOIN dw d ON d.t = w.t AND d.dyad = ? ORDER BY w.t""",
                      [first.date(), last_sunday.date(), dyad]).df()
-    # pad missing weeks (before data starts) with zeros
-    if len(df) < n_weeks:
-        pad = pd.DataFrame({"t": pd.date_range(first, periods=n_weeks - len(df), freq="7D")})
-        df = pd.concat([pad, df], ignore_index=True).fillna(0)
+    df["t"] = pd.to_datetime(df.t)
+    # weeks with no wt row (before data starts, or after the panel ends) are zero-filled in place
+    df = cal.merge(df, on="t", how="left").fillna(0)
     out = pd.DataFrame({"t": df.t})
     out["log_events"] = np.log1p(df.n_events)
     out["q4_share"] = df.q4 / df.n_events.replace(0, np.nan)
@@ -52,7 +53,10 @@ def weekly_frame(con, dyad, end_date, n_weeks=N_WEEKS):
     return out.fillna(0.0)
 
 
-def fit_scaler(panel_dir=PANEL_DIR, fit_end="2010-01-01", path=SCALER_PATH):
+def fit_scaler(panel_dir=PANEL_DIR, fit_end=None, path=SCALER_PATH):
+    rc = yaml.safe_load(open(os.path.join(ROOT, "config.yaml")))["retrieval"]
+    assert DIM == rc["vector_dim"], f"retrieval.vector_dim={rc['vector_dim']} but vectors.py builds {DIM} dims"
+    fit_end = fit_end or str(rc["vector_scaler_fit_end"])
     con = _con(panel_dir)
     stats = con.execute(f"""
       WITH x AS (

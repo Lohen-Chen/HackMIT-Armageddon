@@ -131,12 +131,17 @@ export default function Game({ onOpen, hasMarkets }: Props) {
             <div className="reveal">
               <Player who="You" p={p} y={ep.outcome} win={brier(p, ep.outcome) <= brier(ep.p_model, ep.outcome)} />
               <Player
-                who="Model"
+                who={ep.model_kind === 'stacked_percentile' ? 'Model (re-fit on other markets)' : 'Model'}
+                title={
+                  ep.model_kind === 'stacked_percentile'
+                    ? 'Not the raw 30-day crisis-onset forecast: the dyad\'s GDELT risk percentile that week, mapped to this question type by a logistic fit on the other markets (this one held out).'
+                    : 'The calibrated 30-day forecast the model made at the time, from a walk-forward fold that never saw this week.'
+                }
                 p={ep.p_model}
                 y={ep.outcome}
                 win={brier(ep.p_model, ep.outcome) < brier(p, ep.outcome)}
                 note={
-                  ep.kind === 'icb'
+                  ep.model_kind === 'calibrated_oos'
                     ? 'walk-forward out-of-sample'
                     : `GDELT risk percentile ${((ep.model_pct ?? 0) * 100).toFixed(0)} mapped to this question type (leave-one-out)`
                 }
@@ -199,7 +204,7 @@ export default function Game({ onOpen, hasMarkets }: Props) {
             half are high-risk weeks where nothing was coded. The model's number is the forecast it made <em>at the time</em>, never
             refit on the answer.
             {hasMarkets
-              ? ' Market episodes use a Polymarket/Kalshi price 30 days before resolution and the model\'s forecast for the same week.'
+              ? ' Market episodes use a Polymarket/Kalshi price 30 days before resolution; the model\'s number there is its GDELT risk percentile for that week re-fit to the question type on the other markets (leave-one-out), not the raw crisis-onset forecast.'
               : ' Market episodes appear once market artifacts are built.'}
           </div>
         </div>
@@ -208,9 +213,9 @@ export default function Game({ onOpen, hasMarkets }: Props) {
   )
 }
 
-function Player({ who, p, y, win, note }: { who: string; p: number; y: number; win: boolean; note?: string }) {
+function Player({ who, p, y, win, note, title }: { who: string; p: number; y: number; win: boolean; note?: string; title?: string }) {
   return (
-    <div className={`player ${win ? 'win' : ''}`}>
+    <div className={`player ${win ? 'win' : ''}`} title={title}>
       <div className="who">{who}</div>
       <div className="p">{pct(p, p < 0.01 ? 2 : 1)}</div>
       <div className="brier">Brier {fmt(brier(p, y), 3)}</div>

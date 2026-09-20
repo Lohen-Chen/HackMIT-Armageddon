@@ -1,0 +1,7 @@
+{
+ "final_train_end": "2022-09-30",
+ "final_calibration_start": "2022-10-30",
+ "final_calibration_end": "2026-09-13",
+ "gap_days": 30,
+ "seed": 42
+}

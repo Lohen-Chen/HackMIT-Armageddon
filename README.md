@@ -168,8 +168,13 @@ make markets pack                          # Polymarket/Kalshi collection + comp
 make test lint                             # pytest (ingest, leakage, API) + pyflakes + tsc
 ```
 
-`config.yaml` is the single source of truth for dates, thresholds, fold boundaries and retriever
-weights. Every stage writes parquet under `data/processed/` and reports under `docs/`
+`config.yaml` is the single source of truth for dates, thresholds, fold boundaries, market
+selection and retriever weights; every key in it is read by some stage. Intentionally fixed in
+code instead: the 1/4/13/52-week rolling windows and regime flag (`pipeline/features.py`), the
+market keyword regexes (`markets/compare.py`) and the 13x6 run-up vector layout
+(`retrieval/vectors.py`, checked against `retrieval.vector_dim`). Each trained model writes
+`train_meta.json` (final train/calibration boundary) which the API uses for its in/out-of-sample
+flags. Every stage writes parquet under `data/processed/` and reports under `docs/`
 (`icb_coverage.md`, `labels_report.md`, `retrieval_eval.md`, `icb_variable_tiers.md`,
 `STATUS.md`, `ASSUMPTIONS.md`).
 
