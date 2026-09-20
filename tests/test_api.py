@@ -32,6 +32,12 @@ def test_health_and_meta(client):
     assert len(m["heroes"]) >= 4 and {"ISR_LBN", "IND_PAK", "RUS_UKR"} <= {x["dyad"] for x in m["heroes"]}
     assert m["metrics"]["y_icb"]["model_raw"]["auc"] > 0.8
     assert m["metrics"]["y_icb"]["model_cal"]["brier"] <= m["metrics"]["y_icb"]["base_rate"]["brier"] * 1.01
+    # boundaries come from the tracked train_meta.json files and config.yaml, not module constants
+    assert m["sample_boundaries"] == {"trees_train_end": "2018-10-26", "calibration_end": "2021-11-28",
+                                      "icb_complete_end": "2021-12-31"}
+    assert m["sample_boundaries_by_label"]["y_thresh"] == {"trees_train_end": "2022-09-30", "calibration_end": "2026-09-13",
+                                                            "icb_complete_end": "2021-12-31"}
+    assert not any("train_meta.json missing" in n for n in m["notes"])
 
 
 def test_map_is_ranked_and_snapped_to_sunday(client):
@@ -52,6 +58,10 @@ def test_forecast_flags_and_realised_label(client):
     g = client.get("/api/dyad/CHN_TWN/forecast", params={"date": "2024-07-28", "label": "y_icb"}).json()
     assert g["flags"] == {"trees_out_of_sample": True, "calibration_out_of_sample": True, "icb_label_available": False}
     assert g["onset_within_30d"] is None
+
+    # y_thresh has its own boundaries: 2023 is inside its calibration slice but past the ICB label horizon
+    s = client.get("/api/dyad/CHN_TWN/forecast", params={"date": "2023-01-01", "label": "y_thresh"}).json()
+    assert s["flags"] == {"trees_out_of_sample": True, "calibration_out_of_sample": False, "icb_label_available": False}
 
     u = client.get("/api/dyad/AAA_BBB/forecast", params={"date": "2024-07-28"}).json()
     assert u["available"] is False
@@ -78,6 +88,33 @@ def test_analogs_respect_query_date(client):
 def test_bad_inputs(client):
     assert client.get("/api/map", params={"date": "yesterday"}).status_code == 400
     assert client.get("/api/map", params={"date": "2020-01-01", "label": "y_nope"}).status_code == 400
+    assert client.get("/api/dyad/ISR/analogs", params={"date": "2006-07-05"}).status_code == 400
+    assert client.get("/api/dyad/ISR_LBN'%20OR%20'1'='1/analogs", params={"date": "2006-07-05"}).status_code == 400
+    assert client.get("/api/dyad/isr_lbn/forecast", params={"date": "2006-07-09"}).status_code == 200
+
+
+def test_spa_fallback_blocks_traversal_and_unknown_api(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.main import mount_frontend
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html>spa</html>")
+    (dist / "assets" / "a.js").write_text("1")
+    (tmp_path / "config.yaml").write_text("secret: 1\n")
+
+    a = FastAPI()
+    assert mount_frontend(a, str(dist))
+    with TestClient(a) as c:
+        for p in ("/../../config.yaml", "/..%2F..%2Fconfig.yaml", "/%2E%2E/config.yaml"):
+            r = c.get(p)
+            assert r.status_code in (200, 404), p
+            assert "secret" not in r.text, p
+        assert c.get("/some/route").text == "<html>spa</html>"
+        assert c.get("/assets/a.js").text == "1"
+        assert c.get("/api/nope").status_code == 404
 
 
 def test_markets_and_game(client):
@@ -88,4 +125,6 @@ def test_markets_and_game(client):
         assert r["snapshot_date"] < r["resolution_time"]
     g = client.get("/api/game/episodes", params={"n": 8, "seed": 1}).json()["episodes"]
     assert len(g) == 8 and {e["kind"] for e in g} <= {"icb", "market"}
+    for e in g:
+        assert e["model_kind"] == ("stacked_percentile" if e["kind"] == "market" else "calibrated_oos")
     assert client.get("/api/game/episodes", params={"n": 8, "seed": 1}).json()["episodes"] == g

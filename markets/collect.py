@@ -116,7 +116,9 @@ def poly_history(token_id):
     if os.path.exists(cache):
         return json.load(open(cache))
     h = _get(f"{CLOB}/prices-history", {"market": token_id, "interval": "max", "fidelity": 1440})
-    hist = (h or {}).get("history", [])
+    if h is None:
+        return []
+    hist = h.get("history", [])
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     json.dump(hist, open(cache, "w"))
     return hist

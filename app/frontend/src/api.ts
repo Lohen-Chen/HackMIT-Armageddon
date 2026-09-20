@@ -21,6 +21,8 @@ export type Hero = {
 
 export type ImportanceItem = { feature: string; label: string; gain: number }
 
+export type SampleBoundaries = { trees_train_end: string; calibration_end: string; icb_complete_end: string }
+
 export type Meta = {
   t_min: string
   t_max: string
@@ -32,7 +34,8 @@ export type Meta = {
   countries: Record<string, Country>
   metrics: Record<string, Record<string, { n: number; pos: number; brier: number; logloss: number; auc: number; ap: number }>>
   importance: Record<string, ImportanceItem[]>
-  sample_boundaries: { trees_train_end: string; icb_complete_end: string }
+  sample_boundaries: SampleBoundaries
+  sample_boundaries_by_label: Record<string, SampleBoundaries>
   has_markets: boolean
 }
 
@@ -82,7 +85,7 @@ export type Series = {
   points: SeriesPoint[]
   onsets: Onset[]
   error?: string
-  sample_boundaries?: { trees_train_end: string; icb_complete_end: string }
+  sample_boundaries?: SampleBoundaries
 }
 
 export type Driver = { feature: string; label: string; contribution: number; value: number | null }
@@ -206,6 +209,8 @@ export type Episode = {
   date: string
   question: string
   p_model: number
+  /** stacked_percentile: GDELT risk percentile re-fit (leave-one-out) on the other markets; calibrated_oos: walk-forward forecast */
+  model_kind: 'stacked_percentile' | 'calibrated_oos'
   p_model_raw: number
   model_pct?: number
   p_market: number | null

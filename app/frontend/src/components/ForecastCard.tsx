@@ -86,6 +86,12 @@ export default function ForecastCard({ fc, loading, error, meta, label }: Props)
           {fc.onset_within_30d === false && !fc.current_crisis && (
             <div className="callout quiet">What actually happened: no ICB-coded crisis began in the following 30 days.</div>
           )}
+          {fc.onset_within_30d === null && (
+            <div className="callout quiet">
+              Outcome not coded: ICB v16 coverage ends {meta.sample_boundaries.icb_complete_end}, so part or all of this 30-day
+              horizon has no human-coded label.
+            </div>
+          )}
         </div>
       )}
     </div>

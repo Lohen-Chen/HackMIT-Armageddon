@@ -98,6 +98,7 @@ def pr_points(y, p):
 def run(panel_path, label, cfg, outdir, max_rows=None):
     os.makedirs(outdir, exist_ok=True)
     seed = cfg["seed"]
+    assert cfg["model"]["calibration"] == "isotonic", "only isotonic calibration is implemented"
     gap = pd.Timedelta(days=cfg["model"]["gap_days"])
     params = dict(cfg["model"]["lightgbm"])
     n_rounds = params.pop("num_boost_round")
@@ -116,6 +117,8 @@ def run(panel_path, label, cfg, outdir, max_rows=None):
     X_all = df[feats].astype(float)
     y_all = df[label].astype(int).values
     print(f"label={label} rows={len(df):,} pos={y_all.sum():,} ({y_all.mean():.4%}) features={len(feats)}")
+    # final-model split (used after the folds): last 15% of time is the calibration slice
+    t_cut = df["t"].quantile(0.85)
 
     # persistence baseline: for y_thresh use "did it happen in the last 4 weeks", for y_icb
     # use a hazard proxy: 1/(1+days since last ICB onset)  (both are pre-t information)
@@ -169,8 +172,6 @@ def run(panel_path, label, cfg, outdir, max_rows=None):
     pooled = {name: metrics(P["y"], P[col]) for name, col in
               [("model_raw", "p_raw"), ("model_cal", "p_cal"), ("base_rate", "p_base"),
                ("persistence", "p_persist"), ("logistic", "p_logit")]}
-    with open(os.path.join(outdir, "metrics.json"), "w") as f:
-        json.dump({"label": label, "n_features": len(feats), "folds": fold_metrics, "pooled": pooled}, f, indent=1)
     with open(os.path.join(outdir, "calibration.json"), "w") as f:
         json.dump({"model_cal": reliability(P["y"].values, P["p_cal"].values),
                    "model_raw": reliability(P["y"].values, P["p_raw"].values),
@@ -183,7 +184,6 @@ def run(panel_path, label, cfg, outdir, max_rows=None):
     print("pooled:", json.dumps(pooled, indent=None))
 
     # ---- final model on all labelled data (last 15% of time as calibration slice)
-    t_cut = df["t"].quantile(0.85)
     tr = df["t"] < t_cut - gap
     va = df["t"] >= t_cut
     m = lgb.train(params, lgb.Dataset(X_all[tr], y_all[tr]), n_rounds, valid_sets=[lgb.Dataset(X_all[va], y_all[va])],
@@ -194,6 +194,16 @@ def run(panel_path, label, cfg, outdir, max_rows=None):
     m.save_model(os.path.join(outdir, "final_model.txt"), num_iteration=m.best_iteration)
     with open(os.path.join(outdir, "final_calibrator.pkl"), "wb") as f:
         pickle.dump(cal, f)
+    # written only once the model + calibrator it describes are on disk, so a failed run never
+    # pairs the previous artifacts with this run's boundaries
+    final_meta = {"final_train_end": str((t_cut - gap).date()), "final_calibration_start": str(t_cut.date()),
+                  "final_calibration_end": str(df.loc[va, "t"].max().date()),
+                  "gap_days": int(cfg["model"]["gap_days"]), "seed": int(seed)}
+    with open(os.path.join(outdir, "train_meta.json"), "w") as f:
+        json.dump(final_meta, f, indent=1)
+    with open(os.path.join(outdir, "metrics.json"), "w") as f:
+        json.dump({"label": label, "n_features": len(feats), "folds": fold_metrics, "pooled": pooled,
+                   "final": final_meta}, f, indent=1)
 
     # ---- SHAP on a sample of recent rows
     try:

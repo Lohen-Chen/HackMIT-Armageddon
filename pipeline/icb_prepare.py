@@ -117,10 +117,22 @@ TIER_ACTOR = {
 }
 
 
-def _date(y, m, d):
+# ICB codes an unknown day-of-month as 66 / 77 / 88 (early / mid / late month by convention).
+UNKNOWN_DAY = {66: 5, 77: 15, 88: 25}
+
+
+def _date(y, m, d, end: bool = False):
+    """ICB (year, month, day) -> Timestamp.
+
+    Missing/unknown parts of a *termination* date resolve to the latest possible day (month 12 / month end),
+    so `end_date < query_date` retrieval filters and in-crisis spans are conservative.  Onset dates resolve
+    unknown days to the early/mid/late convention (missing month -> January, missing day -> the 1st).
+    """
     y = pd.to_numeric(y, errors="coerce")
-    m = pd.to_numeric(m, errors="coerce").fillna(1).clip(1, 12)
-    d = pd.to_numeric(d, errors="coerce").fillna(1).clip(1, 31)
+    m = pd.to_numeric(m, errors="coerce").fillna(12 if end else 1).clip(1, 12)
+    d = pd.to_numeric(d, errors="coerce")
+    d = d.where(d.isna() | (d <= 31), 31 if end else d.map(UNKNOWN_DAY).fillna(15))
+    d = d.fillna(31 if end else 1).clip(1, 31)
     out = pd.to_datetime(dict(year=y, month=m, day=d), errors="coerce")
     # roll invalid day-of-month (e.g. 31 Feb) back to month end
     bad = out.isna() & y.notna()
@@ -142,7 +154,8 @@ def prepare(write=True):
     # ---- system level
     cr = sysdf.copy()
     cr["onset_date"] = _date(cr.yrtrig, cr.motrig, cr.datrig)
-    cr["end_date"] = _date(cr.yrterm, cr.moterm, cr.daterm)
+    cr["end_date"] = _date(cr.yrterm, cr.moterm, cr.daterm, end=True)
+    cr["onset_date"] = cr.onset_date.where(~(cr.onset_date > cr.end_date), cr.end_date)
     cr["region"] = cr.geog.map(lambda g: GEOG.get(int(g), ("Unknown", "Other"))[0] if pd.notna(g) else None)
     cr["macro_region"] = cr.geog.map(lambda g: GEOG.get(int(g), ("Unknown", "Other"))[1] if pd.notna(g) else None)
     for col, lab in LABELS.items():
@@ -155,7 +168,8 @@ def prepare(write=True):
     ac["iso3"] = ac.actor.map(COW_TO_ISO3)
     ac["mapped"] = ac.actor.isin([k for k, v in COW_TO_ISO3.items() if v])
     ac["onset_date"] = _date(ac.yrtrig, ac.motrig, ac.datrig)
-    ac["end_date"] = _date(ac.yrterm, ac.moterm, ac.daterm)
+    ac["end_date"] = _date(ac.yrterm, ac.moterm, ac.daterm, end=True)
+    ac["onset_date"] = ac.onset_date.where(~(ac.onset_date > ac.end_date), ac.end_date)
     for col, lab in LABELS.items():
         if col in ac.columns:
             ac[col + "_label"] = ac[col].map(lambda v: lab.get(int(v)) if pd.notna(v) else None)

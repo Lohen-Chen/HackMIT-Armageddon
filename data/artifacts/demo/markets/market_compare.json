@@ -2,27 +2,27 @@
  "n_markets": 60,
  "n_dyads": 20,
  "snapshot_days_before": 30,
- "base_rate": 0.4666666666666667,
+ "base_rate": 0.45,
  "brier": {
   "market": 0.25035187500000006,
-  "base_rate": 0.24888888888888897,
-  "model_raw_icb": 0.4583739746094397
+  "base_rate": 0.24750000000000008,
+  "model_raw_icb": 0.4430126945462758
  },
  "logloss": {
   "market": 0.715750530832167,
-  "base_rate": 0.6909233093138182,
-  "model_raw_icb": 2.5372784781757645
+  "base_rate": 0.6881388137135883,
+  "model_raw_icb": 2.4633374126430234
  },
  "loo": {
-  "market_only": 0.21953966886436785,
-  "model_only": 0.25729831521775626,
-  "market_plus_model": 0.21944831199592724
+  "market_only": 0.22216702279846426,
+  "model_only": 0.2558436848536304,
+  "market_plus_model": 0.22206285296485379
  },
  "by_source": {
   "polymarket": {
    "n": 60,
    "brier_market": 0.25035187500000006,
-   "brier_model": 0.4583739746094397
+   "brier_model": 0.4430126945462758
   }
  },
  "caveats": [

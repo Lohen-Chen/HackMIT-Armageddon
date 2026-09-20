@@ -13,7 +13,6 @@ sys.path.insert(0, ROOT)
 from models.train import FORBIDDEN, FORBIDDEN_PATTERNS, feature_columns  # noqa: E402
 from pipeline.icb_prepare import TIER_ACTOR, TIER_SYSTEM  # noqa: E402
 
-PANEL = os.path.join(ROOT, "data", "processed", "panel", "panel_labelled.parquet")
 FEATURES_JSON = os.path.join(ROOT, "data", "artifacts", "models", "y_icb", "features.json")
 
 
@@ -46,17 +45,16 @@ def test_tiers_are_disjoint():
                 seen[c] = tier
 
 
-def test_features_only_use_data_up_to_t():
+def test_features_only_use_data_up_to_t(panel_paths):
     """Recompute a rolling feature from the raw weekly sums and compare with the panel.
 
     If any feature peeked past t, the recomputation from weeks <= t would not match.
+    Runs against the real panel when built, otherwise the synthetic one from conftest.
     """
-    week = os.path.join(ROOT, "data", "processed", "panel", "dyad_week.parquet")
-    if not (os.path.exists(PANEL) and os.path.exists(week)):
-        pytest.skip("panel not built yet")
+    panel, week = panel_paths["panel"], panel_paths["week"]
     con = duckdb.connect()
     rows = con.execute(f"""
-      WITH p AS (SELECT dyad, t, n_events_w4, q4_w13 FROM read_parquet('{PANEL}')
+      WITH p AS (SELECT dyad, t, n_events_w4, q4_w13 FROM read_parquet('{panel}')
                  WHERE n_events_w4 > 50 USING SAMPLE 200 ROWS (reservoir, 42)),
            w AS (SELECT dyad, t, n_events, q4 FROM read_parquet('{week}'))
       SELECT p.dyad, p.t, p.n_events_w4, p.q4_w13,
@@ -68,13 +66,13 @@ def test_features_only_use_data_up_to_t():
     assert (rows.q4_w13 == rows.re_q4_w13.fillna(0)).all()
 
 
-def test_labels_are_strictly_after_t():
-    if not os.path.exists(PANEL):
-        pytest.skip("panel not built yet")
+def test_labels_are_strictly_after_t(panel_paths):
     con = duckdb.connect()
-    bad = con.execute(f"""SELECT count(*) FROM read_parquet('{PANEL}')
+    panel = panel_paths["panel"]
+    bad = con.execute(f"""SELECT count(*) FROM read_parquet('{panel}')
                           WHERE y_icb=1 AND NOT (next_onset > t AND next_onset <= t + INTERVAL 30 DAY)""").fetchone()[0]
     assert bad == 0
+    assert con.execute(f"SELECT count(*) FROM read_parquet('{panel}') WHERE y_icb=1").fetchone()[0] > 0
 
 
 def test_icb_prepare_has_no_unknown_actor_codes():

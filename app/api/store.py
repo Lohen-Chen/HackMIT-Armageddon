@@ -44,8 +44,8 @@ def R(rel: str) -> str:
             return os.path.join(DEMO, dst, rel[len(src):].lstrip("/"))
     return full
 
-FINAL_TRAIN_END = date(2018, 11, 25)      # trees trained on t < this (85% time quantile, see models/train.py)
-ICB_COMPLETE_END = date(2021, 12, 31)     # calibration slice ends here; everything after is fully out-of-sample
+# boundary of the shipped y_icb final model (t < t_cut - gap, models/train.py) when train_meta.json is absent
+FALLBACK_TRAIN_END = date(2018, 10, 26)
 
 
 def _sunday_on_or_before(d: date) -> date:
@@ -67,6 +67,7 @@ class Store:
         self.cfg = yaml.safe_load(open(P("config.yaml")))
         self.con = duckdb.connect()
         self.notes: List[str] = []
+        self.icb_end = date.fromisoformat(str(self.cfg["labels"]["icb_last_complete_date"]))
         self._load_countries()
         self._load_forecasts()
         self._load_cases()
@@ -86,17 +87,21 @@ class Store:
 
     def _load_forecasts(self):
         self.labels = []
+        self.has_oos: set = set()
         for label in ("y_icb", "y_thresh"):
             f = R(f"data/artifacts/models/{label}/forecasts.parquet")
             if os.path.exists(f):
-                self.con.execute(f"CREATE VIEW fc_{label} AS SELECT * FROM read_parquet('{f}')")
+                self.con.execute(f"CREATE TABLE fc_{label} AS SELECT * FROM read_parquet('{f}')")
+                self.con.execute(f"CREATE TABLE fc_{label}_week AS SELECT t, count(*) AS n_week FROM fc_{label} GROUP BY t")
                 self.labels.append(label)
             pr = R(f"data/artifacts/models/{label}/predictions.parquet")
             if os.path.exists(pr):
-                self.con.execute(f"CREATE VIEW oos_{label} AS SELECT dyad, CAST(t AS DATE) AS t, p_cal AS p_oos, "
+                self.con.execute(f"CREATE TABLE oos_{label} AS SELECT dyad, CAST(t AS DATE) AS t, p_cal AS p_oos, "
                                  f"p_persist, p_base, fold FROM read_parquet('{pr}')")
+                self.has_oos.add(label)
         if not self.labels:
             raise RuntimeError("no forecasts.parquet found; run models/score.py")
+        self._q97 = float(self.con.execute("SELECT quantile_cont(p_raw, 0.97) FROM fc_y_icb").fetchone()[0])
         lo, hi = self.con.execute("SELECT min(t), max(t) FROM fc_y_icb").fetchone()
         self.t_min, self.t_max = lo, hi
         self.metrics = {l: json.load(open(P("data/artifacts/models", l, "metrics.json"))) for l in self.labels}
@@ -127,11 +132,19 @@ class Store:
 
     def _load_model(self):
         import lightgbm as lgb
-        self.model, self.features, self.importance = {}, {}, {}
+        self.model, self.features, self.importance, self.train_end, self.cal_end = {}, {}, {}, {}, {}
         for label in self.labels:
             d = P("data/artifacts/models", label)
             self.model[label] = lgb.Booster(model_file=os.path.join(d, "final_model.txt"))
             self.features[label] = json.load(open(os.path.join(d, "features.json")))
+            meta = os.path.join(d, "train_meta.json")
+            if os.path.exists(meta):
+                tm = json.load(open(meta))
+                self.train_end[label] = date.fromisoformat(tm["final_train_end"])
+                self.cal_end[label] = date.fromisoformat(tm.get("final_calibration_end", str(self.icb_end)))
+            else:
+                self.train_end[label], self.cal_end[label] = FALLBACK_TRAIN_END, self.icb_end
+                self.notes.append(f"{label}: train_meta.json missing, trees_out_of_sample boundary is the fallback {FALLBACK_TRAIN_END}")
             shp = os.path.join(d, "shap_summary.csv")
             if os.path.exists(shp):
                 s = pd.read_csv(shp)
@@ -183,9 +196,17 @@ class Store:
         w = _sunday_on_or_before(d)
         return max(self.t_min, min(self.t_max, w))
 
-    def _sample_flags(self, t: date) -> dict:
-        return {"trees_out_of_sample": t >= FINAL_TRAIN_END, "calibration_out_of_sample": t > ICB_COMPLETE_END,
-                "icb_label_available": t <= ICB_COMPLETE_END}
+    def _horizon_coded(self, t: date) -> bool:
+        """True when the whole label horizon falls inside ICB coverage."""
+        return t + timedelta(days=self.cfg["labels"]["horizon_days"]) <= self.icb_end
+
+    def _sample_flags(self, t: date, label: str) -> dict:
+        return {"trees_out_of_sample": t >= self.train_end[label], "calibration_out_of_sample": t > self.cal_end[label],
+                "icb_label_available": self._horizon_coded(t)}
+
+    def _boundaries(self, label: str = "y_icb") -> dict:
+        return {"trees_train_end": str(self.train_end[label]), "calibration_end": str(self.cal_end[label]),
+                "icb_complete_end": str(self.icb_end)}
 
     # ------------------------------------------------------------------ queries
     @_locked
@@ -202,7 +223,8 @@ class Store:
                 "heroes": heroes, "retrieval_mode": self.retrieval_mode, "notes": self.notes,
                 "dyads": [{"dyad": d["dyad"], "label": self.dyad_label(d["dyad"])} for d in top],
                 "countries": self.countries, "metrics": pooled, "importance": self.importance,
-                "sample_boundaries": {"trees_train_end": str(FINAL_TRAIN_END), "icb_complete_end": str(ICB_COMPLETE_END)},
+                "sample_boundaries": self._boundaries(),
+                "sample_boundaries_by_label": {l: self._boundaries(l) for l in self.labels},
                 "has_markets": self.market_joined is not None}
 
     @_locked
@@ -228,7 +250,7 @@ class Store:
     def series(self, dyad: str, start: date, end: date, label: str = "y_icb") -> dict:
         if dyad not in self.dyads:
             return {"dyad": dyad, "points": [], "onsets": [], "error": "dyad not in panel"}
-        has_oos = self.con.execute("SELECT count(*) FROM duckdb_views() WHERE view_name = ?", [f"oos_{label}"]).fetchone()[0] > 0
+        has_oos = label in self.has_oos
         oos_join = f"LEFT JOIN oos_{label} o USING (dyad, t)" if has_oos else ""
         oos_cols = "o.p_oos, o.p_persist," if has_oos else "NULL AS p_oos, NULL AS p_persist,"
         df = self.con.execute(f"""
@@ -253,15 +275,15 @@ class Store:
                   for c in self.onsets_by_dyad.get(dyad, [])
                   if date.fromisoformat(c["onset_date"]) <= end and date.fromisoformat(c["end_date"]) >= start]
         return {"dyad": dyad, "label": self.dyad_label(dyad), "points": pts, "onsets": onsets,
-                "sample_boundaries": {"trees_train_end": str(FINAL_TRAIN_END), "icb_complete_end": str(ICB_COMPLETE_END)}}
+                "sample_boundaries": self._boundaries(label)}
 
     @_locked
     def forecast(self, dyad: str, d: date, label: str = "y_icb", n_drivers: int = 8) -> dict:
         t = self.week(d)
         row = self.con.execute(f"""
-            SELECT f.*, (SELECT count(*) FROM fc_{label} g WHERE g.t = f.t) AS n_week,
+            SELECT f.*, w.n_week,
                    (SELECT count(*) FROM fc_{label} g WHERE g.t = f.t AND g.p_raw > f.p_raw) AS n_above
-            FROM fc_{label} f WHERE f.dyad = ? AND f.t = ?""", [dyad, t]).df()
+            FROM fc_{label} f JOIN fc_{label}_week w USING (t) WHERE f.dyad = ? AND f.t = ?""", [dyad, t]).df()
         if row.empty:
             return {"dyad": dyad, "t": str(t), "available": False,
                     "reason": "dyad not in the active universe this week (fewer than 200 events in trailing year)"}
@@ -269,17 +291,18 @@ class Store:
         out = {"dyad": dyad, "label": self.dyad_label(dyad), "t": str(t), "available": True,
                "p_raw": float(r.p_raw), "p_cal": float(r.p_cal), "p_lo": float(r.p_lo), "p_hi": float(r.p_hi),
                "in_crisis": bool(r.in_crisis), "y": None if pd.isna(r.y) else int(r.y),
-               "rank": int(r.n_above) + 1, "n_dyads": int(r.n_week), "flags": self._sample_flags(t)}
-        out["drivers"] = self.drivers(dyad, t, label, n_drivers)
+               "rank": int(r.n_above) + 1, "n_dyads": int(r.n_week), "flags": self._sample_flags(t, label)}
+        out["drivers"] = self._drivers(dyad, t, label, n_drivers)
         out["current_crisis"] = next(({"crisno": c["crisno"], "name": c["name"], "onset_date": c["onset_date"],
                                        "end_date": c["end_date"]} for c in self.onsets_by_dyad.get(dyad, [])
                                       if date.fromisoformat(c["onset_date"]) <= t <= date.fromisoformat(c["end_date"])), None)
-        nxt = [c for c in self.onsets_by_dyad.get(dyad, []) if t < date.fromisoformat(c["onset_date"]) <= t + timedelta(days=30)]
-        out["onset_within_30d"] = None if t > ICB_COMPLETE_END else (
+        h = timedelta(days=self.cfg["labels"]["horizon_days"])
+        nxt = [c for c in self.onsets_by_dyad.get(dyad, []) if t < date.fromisoformat(c["onset_date"]) <= t + h]
+        out["onset_within_30d"] = None if not self._horizon_coded(t) else (
             {"crisno": nxt[0]["crisno"], "name": nxt[0]["name"], "onset_date": nxt[0]["onset_date"]} if nxt else False)
         return out
 
-    def drivers(self, dyad: str, t: date, label: str, n: int = 8) -> dict:
+    def _drivers(self, dyad: str, t: date, label: str, n: int = 8) -> dict:
         feats = self.features[label]
         if not self.has_panel:
             return {"mode": "global", "items": self.importance.get(label, [])[:n]}
@@ -424,7 +447,8 @@ class Store:
                 eps.append({"kind": "market", "dyad": r.dyad, "dyad_label": self.dyad_label(r.dyad),
                             "date": str(pd.Timestamp(r.snapshot_date).date()), "question": q,
                             "resolution_time": str(pd.Timestamp(r.resolution_time).date()),
-                            "p_model": float(r.p_stack_model), "p_model_raw": float(r.p_model), "model_pct": float(r.model_pct),
+                            "p_model": float(r.p_stack_model), "model_kind": "stacked_percentile",
+                            "p_model_raw": float(r.p_model), "model_pct": float(r.model_pct),
                             "p_market": float(r.p_market), "outcome": int(r.outcome_esc), "url": r.url})
         # historical ICB episodes: balanced positives / negatives, walk-forward OOS windows only
         need = n - len(eps)
@@ -436,15 +460,15 @@ class Store:
         neg = self.con.execute("""
             SELECT f.dyad, f.t, f.p_cal, f.p_raw, f.y, o.p_oos FROM fc_y_icb f JOIN oos_y_icb o USING (dyad, t)
             WHERE f.y = 0 AND f.in_crisis = 0 AND f.t >= DATE '1997-01-01'
-              AND f.p_raw > (SELECT quantile_cont(p_raw, 0.97) FROM fc_y_icb)
-            ORDER BY hash(concat(f.dyad, f.t, ?)) LIMIT ?""", [salt, max(1, need - need // 2)]).df()
+              AND f.p_raw > ?
+            ORDER BY hash(concat(f.dyad, f.t, ?)) LIMIT ?""", [self._q97, salt, max(1, need - need // 2)]).df()
         for r in pd.concat([pos, neg]).itertuples():
             t = pd.Timestamp(r.t).date()
             nxt = next((c for c in self.onsets_by_dyad.get(r.dyad, [])
                         if t < date.fromisoformat(c["onset_date"]) <= t + timedelta(days=30)), None)
             eps.append({"kind": "icb", "dyad": r.dyad, "dyad_label": self.dyad_label(r.dyad), "date": str(t),
                         "question": f"Will an ICB-coded international crisis between {self.dyad_label(r.dyad)} begin in the 30 days after {t}?",
-                        "p_model": float(r.p_oos), "p_model_raw": float(r.p_raw), "p_market": None,
+                        "p_model": float(r.p_oos), "model_kind": "calibrated_oos", "p_model_raw": float(r.p_raw), "p_market": None,
                         "outcome": int(r.y), "crisis": None if nxt is None else nxt["name"]})
         rng.shuffle(eps)
         return eps[:n]

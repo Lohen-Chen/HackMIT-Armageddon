@@ -13,18 +13,16 @@ gdelt:
   max_event_lag_days: 7
 
 panel:
-  frequency: weekly            # forecast date t = Sunday; features use days <= t, labels use (t, t+30d]
-  windows_days: [7, 28, 91, 364]   # 1 / 4 / 13 / 52 whole weeks (spec's 30/90d approximated by whole weeks)
+  # weekly: forecast date t = Sunday; features use days <= t, labels use (t, t+30d].  Rolling windows of
+  # 1 / 4 / 13 / 52 whole weeks and the daily-file-era regime flag (>= 2013-04-01) are fixed in pipeline/features.py.
   # dyad universe: undirected pairs with >= min_trailing_events in the trailing 365 days at the forecast date
   min_trailing_events_365d: 200
-  regime_indicator: true       # 1 for daily-file era (>= 2013-04-01), 0 for backfile era
 
 labels:
   horizon_days: 30             # primary: ICB onset for the dyad within next 30 days
   # secondary: material-conflict (QuadClass 4) rate in next 30d exceeds baseline * ratio and >= min_events
-  threshold_ratio: 3.0
+  threshold_ratio: 3.0         # baseline = trailing-52-week QuadClass-4 rate (pipeline/features.py q4_base_4w)
   threshold_min_events: 20
-  baseline_window_days: 365
   icb_last_complete_date: "2021-12-31"  # ICB v16 last coded onset 2021-09-20
 
 model:
@@ -48,13 +46,10 @@ model:
     num_boost_round: 600
     early_stopping_rounds: 50
     verbose: -1
-  calibration: isotonic        # fit on the validation slice only
-  interval: bootstrap          # bootstrap over trees/rows for the confidence band shown in the app
-  n_bootstrap: 30
+  calibration: isotonic        # fit on the validation slice only; band = Wilson 80% interval per isotonic step (models/score.py)
 
 elasticsearch:
   cases_index: signal_icb_cases
-  forecasts_index: signal_dyad_forecasts
 
 retrieval:
   vector_dim: 78               # 13 weeks x 6 z-scored GDELT features (see retrieval/vectors.py)
@@ -73,16 +68,19 @@ retrieval:
       protrac: 1.0
       ethnic: 0.5
       pcid: 0.5
+      noactr: 0.5
     at_onset:
       trigent_type: 2.0
       issues: 1.5
       gravcr: 1.5
-      noactr: 0.5
   rrf_k: 60
 
 markets:
-  snapshot_days_before_resolution: [30, 14, 7, 1]
+  snapshot_days_before_resolution: [30, 14, 7, 1]   # collect.py stores a price at each; compare.py scores the first
   min_markets: 20
+  max_per_event: 1
+  max_per_dyad: 5
+  min_volume_usd: 250000
 
 demo:
   # seeded hero replays (dyad, window). Middle East + Asia focus.

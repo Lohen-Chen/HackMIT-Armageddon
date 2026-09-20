@@ -1,4 +1,4 @@
-.PHONY: setup demo serve frontend test lint pipeline features labels train score cases index-es retrieval-eval markets pack screenshots
+.PHONY: setup lock demo serve frontend test lint pipeline features labels train score cases index-es retrieval-eval markets pack screenshots
 
 PY ?= python3
 GDELT_OUT ?= data/processed/gdelt
@@ -8,8 +8,12 @@ export PYTHONPATH := .
 
 ## ---- one-command demo (uses the git-tracked demo pack + cases.jsonl; no data rebuild) ----
 setup:
+	@test -n "$$VIRTUAL_ENV$$CONDA_PREFIX" || echo "warning: installing into the global interpreter; consider python3 -m venv .venv"
 	$(PY) -m pip install -r requirements.txt
 	cd app/frontend && npm ci
+
+lock:                ## regenerate the pinned requirements.txt from requirements.in (Python 3.11 / Linux)
+	$(PY) -m piptools compile --strip-extras --no-header --output-file requirements.txt requirements.in
 
 demo: setup frontend serve
 
@@ -27,7 +31,7 @@ test:
 
 lint:
 	$(PY) -m pyflakes app/api pipeline labels models retrieval markets scripts tests
-	cd app/frontend && npm run typecheck
+	cd app/frontend && npm run typecheck && npm run lint
 
 ## ---- full pipeline (hours; needs ~40 GB disk for GDELT zips, or run on the compute box) ----
 pipeline: icb ingest features labels train score cases index-es retrieval-eval markets pack

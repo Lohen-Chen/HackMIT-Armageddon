@@ -88,7 +88,8 @@ Decisions taken without asking, with the reason.  Newest at the bottom.
 18. Market selection (`markets/compare.py`): resolved binary markets, >= $250k volume, escalation
     keywords, no "daily"/repeating questions, one market per Polymarket event and at most five per
     dyad, ranked by volume.  Ceasefire / peace / withdrawal questions are inverted so YES means
-    escalation.  Snapshot = last CLOB price 30 days before resolution; the model forecast is the last
+    escalation; a negated predicate ("Will *no* engagement occur?") flips the orientation again, so
+    both `p_market` and the resolved outcome are always expressed on the escalation side.  Snapshot = last CLOB price 30 days before resolution; the model forecast is the last
     weekly forecast at or before the snapshot date (and no more than 13 days before it).
 19. The "model vs market" Brier compares the model's ICB-onset probability with a *different*
     question; it is displayed as a diagnostic.  The leave-one-out logistic stack (market-only vs
@@ -103,6 +104,11 @@ Decisions taken without asking, with the reason.  Newest at the bottom.
     local schema search otherwise; both implement the same interface and the same date invariant.
 23. Calibrated probabilities are never smoothed; the Wilson band is the 80% interval of the realised
     rate in the isotonic step the raw score falls into (validation rows).
+24. ICB dates: the codebook's unknown-day codes 66 / 77 / 88 (early / mid / late month) become day
+    5 / 15 / 25 for onset dates; unknown termination day or month resolves to month end / December so
+    `end_date` is conservative for the `end_date < query_date` filter and for `in_crisis` spans.  A
+    normalised onset later than its termination would be clamped to the termination date (currently
+    no crisis needs it).
 
 ## Infra
 14. Analytical source of truth is parquet under `data/processed/`; Elasticsearch holds only the
