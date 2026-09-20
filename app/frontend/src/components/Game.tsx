@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, type Episode } from '../api'
 import { brier, fmt, pct } from '../util'
 import { Skeleton, ErrorBox, Empty } from './States'
@@ -18,14 +18,16 @@ export default function Game({ onOpen, hasMarkets }: Props) {
   const [tally, setTally] = useState<Tally>(zero)
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 1e6))
 
-  const load = useCallback(() => {
-    setEps(null)
-    setErr(undefined)
-    setI(0)
-    setRevealed(false)
-    api.episodes(8, seed).then(setEps, (e: Error) => setErr(e.message))
+  useEffect(() => {
+    let alive = true
+    api.episodes(8, seed).then(
+      (e) => alive && setEps(e),
+      (e: Error) => alive && setErr(e.message),
+    )
+    return () => {
+      alive = false
+    }
   }, [seed])
-  useEffect(load, [load])
 
   if (err) return <ErrorBox title="Couldn’t load game episodes" detail={err} />
   if (!eps)
@@ -66,6 +68,10 @@ export default function Game({ onOpen, hasMarkets }: Props) {
     }
   }
   const restart = () => {
+    setEps(null)
+    setErr(undefined)
+    setI(0)
+    setRevealed(false)
     setTally(zero)
     setSeed(Math.floor(Math.random() * 1e6))
   }

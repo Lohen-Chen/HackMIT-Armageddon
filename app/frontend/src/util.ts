@@ -42,6 +42,8 @@ export type Async<T> = { status: 'idle' | 'loading' | 'ok' | 'error'; data?: T; 
 export function useAsync<T>(fn: (() => Promise<T>) | null, deps: unknown[], debounceMs = 0): Async<T> {
   const [state, setState] = useState<Async<T>>({ status: fn ? 'loading' : 'idle' })
   const seq = useRef(0)
+  // deps is caller-supplied, so the linter cannot see the dependency list
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!fn) {
       setState({ status: 'idle' })

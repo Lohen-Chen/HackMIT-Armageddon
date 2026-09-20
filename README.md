@@ -165,8 +165,12 @@ make features labels                       # dyad-week panel + labels (minutes w
 make train score                           # walk-forward LightGBM, calibration, baselines, SHAP; score all weeks
 make cases index-es retrieval-eval         # run-up vectors, ICB case docs, ES index, head-to-head
 make markets pack                          # Polymarket/Kalshi collection + comparison, then rebuild the demo pack
-make test lint                             # pytest (ingest, leakage, API) + pyflakes + tsc
+make test lint                             # pytest (ingest, leakage, API) + pyflakes + tsc + oxlint
 ```
+
+`requirements.txt` is a lock file generated from `requirements.in` (the loose, hand-edited
+dependency list) with pip-tools on Python 3.11 / Linux; edit `requirements.in` and run
+`make lock` (`pip install pip-tools` first) to re-pin. CI and `make setup` install from the lock.
 
 `config.yaml` is the single source of truth for dates, thresholds, fold boundaries, market
 selection and retriever weights; every key in it is read by some stage. Intentionally fixed in

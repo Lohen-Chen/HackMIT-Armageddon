@@ -9,8 +9,8 @@ import numpy as np
 
 # fields the schema retriever is allowed to score on (tiers pre_onset / at_onset only)
 SCHEMA_FIELDS_PRE = ["geog", "powdissy", "gpinv", "powinv", "protrac", "pcid", "ethnic",
-                     "syslevsy", "regime_pair", "nuclear_max", "powsta_max"]
-SCHEMA_FIELDS_AT = ["trigent_type", "gravcr", "issues", "noactr"]
+                     "syslevsy", "noactr", "regime_pair", "nuclear_max", "powsta_max"]
+SCHEMA_FIELDS_AT = ["trigent_type", "gravcr", "issues"]
 
 
 @dataclass

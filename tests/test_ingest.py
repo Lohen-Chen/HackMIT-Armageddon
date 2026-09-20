@@ -25,7 +25,7 @@ def _row(sqldate, a1code, a1cc, a2code, a2cc, event="190", root="19", quad="4", 
 def _run(rows, tmp_path, dedupe=True, file_day="20180101"):
     p = tmp_path / "x.csv"
     p.write_text("\n".join(rows) + "\n")
-    raw, ev, dyad, daily, country = build_sql(str(p), True, file_day, 7, dedupe)
+    raw, ev, dyad, daily = build_sql(str(p), True, file_day, 7, dedupe)
     con = duckdb.connect()
     con.execute(f"CREATE TEMP TABLE ev AS WITH raw AS ({raw}) {ev}")
     return con, con.execute(dyad).df()
@@ -91,7 +91,7 @@ def test_process_file_regenerates_partial_outputs(tmp_path, monkeypatch):
 
     stem, msg, _ = gdelt_ingest.process_file(name, str(work), str(out), threads=1)
     assert msg == "1 events"
-    for sub in ("dyad_day", "daily_totals", "country_day"):
+    for sub in ("dyad_day", "daily_totals"):
         assert (out / sub / f"{stem}.parquet").exists()
     assert gdelt_ingest.process_file(name, str(work), str(out), threads=1)[1] == "skip"
     assert len(calls) == 1

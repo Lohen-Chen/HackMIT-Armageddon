@@ -87,17 +87,21 @@ class Store:
 
     def _load_forecasts(self):
         self.labels = []
+        self.has_oos: set = set()
         for label in ("y_icb", "y_thresh"):
             f = R(f"data/artifacts/models/{label}/forecasts.parquet")
             if os.path.exists(f):
-                self.con.execute(f"CREATE VIEW fc_{label} AS SELECT * FROM read_parquet('{f}')")
+                self.con.execute(f"CREATE TABLE fc_{label} AS SELECT * FROM read_parquet('{f}')")
+                self.con.execute(f"CREATE TABLE fc_{label}_week AS SELECT t, count(*) AS n_week FROM fc_{label} GROUP BY t")
                 self.labels.append(label)
             pr = R(f"data/artifacts/models/{label}/predictions.parquet")
             if os.path.exists(pr):
-                self.con.execute(f"CREATE VIEW oos_{label} AS SELECT dyad, CAST(t AS DATE) AS t, p_cal AS p_oos, "
+                self.con.execute(f"CREATE TABLE oos_{label} AS SELECT dyad, CAST(t AS DATE) AS t, p_cal AS p_oos, "
                                  f"p_persist, p_base, fold FROM read_parquet('{pr}')")
+                self.has_oos.add(label)
         if not self.labels:
             raise RuntimeError("no forecasts.parquet found; run models/score.py")
+        self._q97 = float(self.con.execute("SELECT quantile_cont(p_raw, 0.97) FROM fc_y_icb").fetchone()[0])
         lo, hi = self.con.execute("SELECT min(t), max(t) FROM fc_y_icb").fetchone()
         self.t_min, self.t_max = lo, hi
         self.metrics = {l: json.load(open(P("data/artifacts/models", l, "metrics.json"))) for l in self.labels}
@@ -246,7 +250,7 @@ class Store:
     def series(self, dyad: str, start: date, end: date, label: str = "y_icb") -> dict:
         if dyad not in self.dyads:
             return {"dyad": dyad, "points": [], "onsets": [], "error": "dyad not in panel"}
-        has_oos = self.con.execute("SELECT count(*) FROM duckdb_views() WHERE view_name = ?", [f"oos_{label}"]).fetchone()[0] > 0
+        has_oos = label in self.has_oos
         oos_join = f"LEFT JOIN oos_{label} o USING (dyad, t)" if has_oos else ""
         oos_cols = "o.p_oos, o.p_persist," if has_oos else "NULL AS p_oos, NULL AS p_persist,"
         df = self.con.execute(f"""
@@ -277,9 +281,9 @@ class Store:
     def forecast(self, dyad: str, d: date, label: str = "y_icb", n_drivers: int = 8) -> dict:
         t = self.week(d)
         row = self.con.execute(f"""
-            SELECT f.*, (SELECT count(*) FROM fc_{label} g WHERE g.t = f.t) AS n_week,
+            SELECT f.*, w.n_week,
                    (SELECT count(*) FROM fc_{label} g WHERE g.t = f.t AND g.p_raw > f.p_raw) AS n_above
-            FROM fc_{label} f WHERE f.dyad = ? AND f.t = ?""", [dyad, t]).df()
+            FROM fc_{label} f JOIN fc_{label}_week w USING (t) WHERE f.dyad = ? AND f.t = ?""", [dyad, t]).df()
         if row.empty:
             return {"dyad": dyad, "t": str(t), "available": False,
                     "reason": "dyad not in the active universe this week (fewer than 200 events in trailing year)"}
@@ -288,7 +292,7 @@ class Store:
                "p_raw": float(r.p_raw), "p_cal": float(r.p_cal), "p_lo": float(r.p_lo), "p_hi": float(r.p_hi),
                "in_crisis": bool(r.in_crisis), "y": None if pd.isna(r.y) else int(r.y),
                "rank": int(r.n_above) + 1, "n_dyads": int(r.n_week), "flags": self._sample_flags(t, label)}
-        out["drivers"] = self.drivers(dyad, t, label, n_drivers)
+        out["drivers"] = self._drivers(dyad, t, label, n_drivers)
         out["current_crisis"] = next(({"crisno": c["crisno"], "name": c["name"], "onset_date": c["onset_date"],
                                        "end_date": c["end_date"]} for c in self.onsets_by_dyad.get(dyad, [])
                                       if date.fromisoformat(c["onset_date"]) <= t <= date.fromisoformat(c["end_date"])), None)
@@ -298,7 +302,7 @@ class Store:
             {"crisno": nxt[0]["crisno"], "name": nxt[0]["name"], "onset_date": nxt[0]["onset_date"]} if nxt else False)
         return out
 
-    def drivers(self, dyad: str, t: date, label: str, n: int = 8) -> dict:
+    def _drivers(self, dyad: str, t: date, label: str, n: int = 8) -> dict:
         feats = self.features[label]
         if not self.has_panel:
             return {"mode": "global", "items": self.importance.get(label, [])[:n]}
@@ -456,8 +460,8 @@ class Store:
         neg = self.con.execute("""
             SELECT f.dyad, f.t, f.p_cal, f.p_raw, f.y, o.p_oos FROM fc_y_icb f JOIN oos_y_icb o USING (dyad, t)
             WHERE f.y = 0 AND f.in_crisis = 0 AND f.t >= DATE '1997-01-01'
-              AND f.p_raw > (SELECT quantile_cont(p_raw, 0.97) FROM fc_y_icb)
-            ORDER BY hash(concat(f.dyad, f.t, ?)) LIMIT ?""", [salt, max(1, need - need // 2)]).df()
+              AND f.p_raw > ?
+            ORDER BY hash(concat(f.dyad, f.t, ?)) LIMIT ?""", [self._q97, salt, max(1, need - need // 2)]).df()
         for r in pd.concat([pos, neg]).itertuples():
             t = pd.Timestamp(r.t).date()
             nxt = next((c for c in self.onsets_by_dyad.get(r.dyad, [])
